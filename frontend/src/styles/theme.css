@@ -19,6 +19,18 @@
   --el-color-primary-light-9: #edf4ef;
   --el-color-primary-dark-2: #205b47;
   --el-border-radius-base: 3px;
+  --lf-radius-sm: 8px;
+  --lf-radius: 12px;
+  --lf-radius-lg: 16px;
+  --lf-shadow-1: 0 1px 2px rgb(33 64 48 / 6%);
+  --lf-shadow-2: 0 8px 24px rgb(33 64 48 / 10%);
+  --lf-shadow-3: 0 16px 48px rgb(33 64 48 / 16%);
+  --lf-space-1: 4px;
+  --lf-space-2: 8px;
+  --lf-space-3: 12px;
+  --lf-space-4: 16px;
+  --lf-space-5: 24px;
+  --lf-space-6: 32px;
 }
 
 html, body, #app { min-height: 100%; }
