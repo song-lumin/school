@@ -1,0 +1,14 @@
+node_modules/
+*.log
+.DS_Store
+.env
+.env.local
+dist/
+build/
+target/
+*.class
+.idea/
+.vscode/
+*.iml
+.superpowers/
+.worktrees/

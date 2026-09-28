@@ -1,0 +1,52 @@
+:root {
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: #26332f;
+  background: #f4f7f5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --lf-ink: #26332f;
+  --lf-muted: #7d8a83;
+  --lf-green: #26745c;
+  --lf-green-deep: #205b47;
+  --lf-coral: #d96c5f;
+  --lf-border: #e2e9e4;
+  --lf-canvas: #f4f7f5;
+  --el-color-primary: #26745c;
+  --el-color-primary-light-3: #64a18a;
+  --el-color-primary-light-5: #8ab8a5;
+  --el-color-primary-light-7: #b8d4c7;
+  --el-color-primary-light-8: #d2e4db;
+  --el-color-primary-light-9: #edf4ef;
+  --el-color-primary-dark-2: #205b47;
+  --el-border-radius-base: 3px;
+}
+
+html, body, #app { min-height: 100%; }
+body { min-width: 320px; background: var(--lf-canvas); color: var(--lf-ink); }
+button, input { font: inherit; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 3px solid #5b9b80; outline-offset: 3px; }
+::selection { background: #cfe3d7; color: #204b39; }
+
+.el-card {
+  --el-card-border-color: var(--lf-border);
+  border-radius: 4px;
+  box-shadow: none;
+}
+.el-card__header { padding: 16px 20px; border-bottom-color: var(--lf-border); }
+.el-card__body { padding: 20px; }
+.el-button { font-weight: 550; }
+.el-button--primary { --el-button-bg-color: var(--lf-green); --el-button-border-color: var(--lf-green); --el-button-hover-bg-color: var(--lf-green-deep); --el-button-hover-border-color: var(--lf-green-deep); }
+.el-input__wrapper, .el-select__wrapper, .el-textarea__inner, .el-date-editor.el-input__wrapper {
+  box-shadow: 0 0 0 1px #dce5df inset;
+}
+.el-input__wrapper.is-focus, .el-select__wrapper.is-focused, .el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--lf-green) inset;
+}
+.el-table { --el-table-border-color: #e5ebe7; --el-table-header-bg-color: #f6f8f6; --el-table-row-hover-bg-color: #f3f7f4; color: var(--lf-ink); }
+.el-table th.el-table__cell { color: #64736b; font-weight: 600; }
+.el-tag { border-radius: 3px; }
+.el-dialog { border-radius: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
