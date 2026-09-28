@@ -16,7 +16,18 @@
         </div>
       </div>
 
-      <div class="intro-scene" @pointermove="onScenePointerMove" @pointerleave="clearTrail">
+      <div class="intro-scene">
+        <div class="scene-controls">
+          <button
+            v-for="v in [1, 3, 5] as const"
+            :key="v"
+            :class="['variant-btn', { active: trailVariant === v }]"
+            @click="trailVariant = v"
+          >
+            {{ v === 1 ? '经典' : v === 3 ? '飞散' : '旋转' }}
+          </button>
+        </div>
+        <ImageTrail :images="trailImages" :variant="trailVariant" />
         <div class="scene-note">校园里的每一条线索，都值得被认真对待。</div>
         <div class="scene-object object-card">
           <el-icon><Postcard /></el-icon>
@@ -30,16 +41,6 @@
           <span>笔记本</span>
         </div>
         <div class="scene-caption">拾到一份善意 · 归还一份安心</div>
-        <img
-          v-for="trail in trailImages"
-          :key="trail.id"
-          class="image-trail"
-          :src="trail.src"
-          :style="{ left: `${trail.x}px`, top: `${trail.y}px`, transform: `translate(-50%, -50%) rotate(${trail.rotation}deg)` }"
-          alt=""
-          @animationend="removeTrail(trail.id)"
-          @error="removeTrail(trail.id)"
-        />
       </div>
     </section>
 
@@ -121,10 +122,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { foundItemApi, lostNoticeApi } from '@/api'
 import type { FoundItem, LostNotice } from '@/types'
+import ImageTrail from '@/components/ImageTrail.vue'
+import { categoryTile } from '@/utils/placeholder'
 
 const router = useRouter()
 const publicCount = ref(0)
@@ -132,9 +135,18 @@ const noticeCount = ref(0)
 const latestItems = ref<FoundItem[]>([])
 const latestNotices = ref<LostNotice[]>([])
 const keyword = ref('')
-const trailImages = ref<Array<{ id: number; src: string; x: number; y: number; rotation: number }>>([])
-let lastTrailAt = 0
-let nextTrailId = 0
+const trailVariant = ref<1 | 3 | 5>(1)
+const trailImages = computed(() => {
+  const real = latestItems.value
+    .flatMap(item => item.images || [])
+    .filter(src => !src.includes('example.com'))
+  const need = 6 - real.length
+  if (need > 0) {
+    const tiles = latestItems.value.slice(0, need).map(item => categoryTile(item.category))
+    return [...real, ...tiles]
+  }
+  return real.slice(0, 6)
+})
 
 const searchItems = () => {
   router.push({ path: '/items', query: keyword.value.trim() ? { keyword: keyword.value.trim() } : {} })
@@ -146,33 +158,6 @@ const categoryTone = (category: string) => {
   if (category.includes('电子')) return 'blue'
   if (category.includes('书')) return 'yellow'
   return 'green'
-}
-
-const onScenePointerMove = (event: PointerEvent) => {
-  if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  const now = Date.now()
-  if (now - lastTrailAt < 150) return
-  const sources = latestItems.value.flatMap((item) => item.images || []).filter((src) => !isPlaceholderImage(src))
-  if (!sources.length) return
-  lastTrailAt = now
-  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const id = nextTrailId++
-  trailImages.value.push({
-    id,
-    src: sources[id % sources.length],
-    x: event.clientX - bounds.left,
-    y: event.clientY - bounds.top,
-    rotation: (id % 2 ? 1 : -1) * (4 + (id % 4) * 2)
-  })
-  if (trailImages.value.length > 5) trailImages.value.shift()
-}
-
-const removeTrail = (id: number) => {
-  trailImages.value = trailImages.value.filter((image) => image.id !== id)
-}
-
-const clearTrail = () => {
-  trailImages.value = []
 }
 
 onMounted(async () => {
@@ -189,8 +174,6 @@ onMounted(async () => {
     noticeCount.value = Number(noticesRes.value.data.total)
   }
 })
-
-onBeforeUnmount(clearTrail)
 </script>
 
 <style scoped>
@@ -217,8 +200,11 @@ onBeforeUnmount(clearTrail)
 .object-key { top: 125px; right: 16%; width: 94px; height: 94px; transform: rotate(10deg); background: #d7b976; color: #fffaf0; }
 .object-book { bottom: 62px; left: 43%; width: 156px; height: 120px; transform: rotate(5deg); background: #d58568; color: #fff7ef; }
 .scene-caption { position: absolute; right: 24px; bottom: 20px; color: #64816e; font-size: 12px; }
-.image-trail { position: absolute; z-index: 4; width: 96px; height: 120px; object-fit: cover; pointer-events: none; animation: trail-out .72s ease-out forwards; box-shadow: 0 12px 28px rgb(23 53 36 / 22%); }
-@keyframes trail-out { 0% { opacity: 0; scale: .78; } 20% { opacity: 1; scale: 1; } 100% { opacity: 0; scale: .94; } }
+.scene-controls { position: absolute; z-index: 5; top: 20px; left: 20px; display: flex; gap: 8px; }
+.variant-btn { padding: 6px 12px; border: 1px solid #83b39a; background: rgb(255 255 255 / 85%); color: #225940; font-size: 12px; cursor: pointer; transition: all .2s; }
+.variant-btn:hover { background: #eef7f1; }
+.variant-btn.active { background: #d8ecdf; border-color: #26745c; font-weight: 600; }
+.intro-scene :deep(.image-trail-container) { position: absolute; inset: 0; height: 100%; z-index: 2; }
 .home-metrics { display: flex; align-items: center; gap: 44px; padding: 22px 28px; background: #fff; border-bottom: 1px solid #e6ece8; }
 .metric-item { display: flex; flex-direction: column; gap: 3px; min-width: 140px; }
 .metric-value { color: #26745c; font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -284,6 +270,5 @@ onBeforeUnmount(clearTrail)
 }
 @media (prefers-reduced-motion: reduce) {
   .found-card { transition: none; }
-  .image-trail { display: none; }
 }
 </style>
