@@ -5,7 +5,6 @@
         <div class="card-header">
           <span>我的申诉工单</span>
           <div>
-            <el-button type="warning" @click="openLostReportDialog">物品丢失申诉</el-button>
             <el-button type="primary" @click="openDisputeDialog">纠纷申诉</el-button>
           </div>
         </div>
@@ -66,11 +65,28 @@
         type="info"
         :closable="false"
         show-icon
-        title="仅限认领人在领取后 24 小时内提交，针对已完成领取的订单"
+        :title="alertText"
         style="margin-bottom: 16px"
       />
       <el-form :model="disputeForm" label-width="90px">
-        <el-form-item label="认领订单" required>
+        <el-form-item label="申诉类型" required>
+          <el-radio-group v-model="disputeForm.disputeType">
+            <el-radio value="ITEM_MISMATCH">物品不符</el-radio>
+            <el-radio value="FALSE_CLAIM">物品被冒领</el-radio>
+            <el-radio value="OTHER">其他纠纷</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="disputeForm.disputeType === 'FALSE_CLAIM'" label="选择物品" required>
+          <el-select v-model="disputeForm.itemId" placeholder="选择被冒领的物品" style="width: 100%" filterable>
+            <el-option
+              v-for="i in claimedItems"
+              :key="i.id"
+              :value="i.id"
+              :label="`#${i.id} ${i.title}`"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="认领订单" required>
           <el-select v-model="disputeForm.applyId" placeholder="选择已完成领取的认领订单" style="width: 100%">
             <el-option
               v-for="a in completedClaims"
@@ -79,12 +95,6 @@
               :label="`#${a.id} ${a.itemTitle || '物品' + a.itemId}（领取于 ${formatTime(a.pickupTime ?? undefined)}）`"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="申诉类型" required>
-          <el-radio-group v-model="disputeForm.disputeType">
-            <el-radio value="ITEM_MISMATCH">物品不符</el-radio>
-            <el-radio value="OTHER">其他纠纷</el-radio>
-          </el-radio-group>
         </el-form-item>
         <el-form-item label="申诉描述" required>
           <el-input
@@ -108,51 +118,6 @@
       <template #footer>
         <el-button @click="disputeDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitDispute">提交申诉</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 物品丢失申诉对话框 -->
-    <el-dialog v-model="lostReportDialogVisible" title="物品丢失申诉" width="560px">
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        title="仅限发布者针对已交至站点（公开中）的物品提交，系统将自动生成监控调取记录"
-        style="margin-bottom: 16px"
-      />
-      <el-form :model="lostForm" label-width="90px">
-        <el-form-item label="选择物品" required>
-          <el-select v-model="lostForm.itemId" placeholder="选择我发布的公开物品" style="width: 100%">
-            <el-option
-              v-for="i in myPublicItems"
-              :key="i.id"
-              :value="i.id"
-              :label="`#${i.id} ${i.title}（${i.dropPointName || '站点'}）`"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="申诉描述" required>
-          <el-input
-            v-model="lostForm.description"
-            type="textarea"
-            :rows="4"
-            maxlength="1000"
-            show-word-limit
-            placeholder="描述物品丢失情况，如最后一次见到物品的时间和地点"
-          />
-        </el-form-item>
-        <el-form-item label="证据图片">
-          <el-input
-            v-model="evidenceInput"
-            placeholder="输入图片 URL（可选），每行一个"
-            type="textarea"
-            :rows="2"
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="lostReportDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitLostReport">提交申诉</el-button>
       </template>
     </el-dialog>
 
@@ -193,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { disputeApi, claimApi, foundItemApi } from '@/api'
 import type { DisputeVO, ClaimApply, FoundItem } from '@/types'
@@ -207,16 +172,25 @@ const total = ref(0)
 const submitting = ref(false)
 
 const completedClaims = ref<ClaimApply[]>([])
-const myPublicItems = ref<FoundItem[]>([])
+const claimedItems = ref<FoundItem[]>([])
 
 const disputeDialogVisible = ref(false)
-const lostReportDialogVisible = ref(false)
 const detailVisible = ref(false)
 const current = ref<DisputeVO | null>(null)
 
-const disputeForm = ref({ applyId: undefined as number | undefined, disputeType: 'ITEM_MISMATCH', description: '' })
-const lostForm = ref({ itemId: undefined as number | undefined, description: '' })
+const disputeForm = ref({
+  disputeType: 'ITEM_MISMATCH',
+  applyId: undefined as number | undefined,
+  itemId: undefined as number | undefined,
+  description: ''
+})
 const evidenceInput = ref('')
+
+const alertText = computed(() =>
+  disputeForm.value.disputeType === 'FALSE_CLAIM'
+    ? '如果你是物品的真正失主，发现物品被他人冒领，可选择物品发起冒领申诉，由管理员审核裁定（无时间限制）'
+    : '仅限认领人在领取后 24 小时内提交，针对已完成领取的订单'
+)
 
 const formatTime = (t?: string) => (t ? new Date(t).toLocaleString('zh-CN') : '—')
 
@@ -239,65 +213,43 @@ const loadDisputes = async () => {
 }
 
 const openDisputeDialog = async () => {
-  const res = await claimApi.listMy({ page: 1, size: 100 })
-  completedClaims.value = res.data.records.filter((a) => a.applyStatus === 1)
-  disputeForm.value = { applyId: undefined, disputeType: 'ITEM_MISMATCH', description: '' }
+  const [claimRes, itemRes] = await Promise.all([
+    claimApi.listMy({ page: 1, size: 100 }),
+    foundItemApi.list({ page: 1, size: 100, itemStatus: 3 })
+  ])
+  completedClaims.value = claimRes.data.records.filter((a) => a.applyStatus === 1)
+  claimedItems.value = itemRes.data.records
+  disputeForm.value = { disputeType: 'ITEM_MISMATCH', applyId: undefined, itemId: undefined, description: '' }
   evidenceInput.value = ''
   disputeDialogVisible.value = true
 }
 
-const openLostReportDialog = async () => {
-  const res = await foundItemApi.listMy({ page: 1, size: 100, itemStatus: 1 })
-  myPublicItems.value = res.data.records
-  lostForm.value = { itemId: undefined, description: '' }
-  evidenceInput.value = ''
-  lostReportDialogVisible.value = true
-}
-
 const submitDispute = async () => {
-  if (!disputeForm.value.applyId) {
-    ElMessage.warning('请选择认领订单')
+  const form = disputeForm.value
+  if (!form.description.trim()) {
+    ElMessage.warning('请填写申诉描述')
     return
   }
-  if (!disputeForm.value.description.trim()) {
-    ElMessage.warning('请填写申诉描述')
+  if (form.disputeType === 'FALSE_CLAIM') {
+    if (!form.itemId) {
+      ElMessage.warning('请选择被冒领的物品')
+      return
+    }
+  } else if (!form.applyId) {
+    ElMessage.warning('请选择认领订单')
     return
   }
   submitting.value = true
   try {
     await disputeApi.create({
-      disputeType: disputeForm.value.disputeType,
-      applyId: disputeForm.value.applyId,
-      description: disputeForm.value.description.trim(),
+      disputeType: form.disputeType,
+      applyId: form.disputeType === 'FALSE_CLAIM' ? undefined : form.applyId,
+      itemId: form.disputeType === 'FALSE_CLAIM' ? form.itemId : undefined,
+      description: form.description.trim(),
       evidenceImages: parseEvidence()
     })
     ElMessage.success('申诉已提交，请等待管理员处理')
     disputeDialogVisible.value = false
-    page.value = 1
-    await loadDisputes()
-  } finally {
-    submitting.value = false
-  }
-}
-
-const submitLostReport = async () => {
-  if (!lostForm.value.itemId) {
-    ElMessage.warning('请选择物品')
-    return
-  }
-  if (!lostForm.value.description.trim()) {
-    ElMessage.warning('请填写申诉描述')
-    return
-  }
-  submitting.value = true
-  try {
-    await disputeApi.createLostReport({
-      itemId: lostForm.value.itemId,
-      description: lostForm.value.description.trim(),
-      evidenceImages: parseEvidence()
-    })
-    ElMessage.success('丢失申诉已提交，系统已生成监控调取记录')
-    lostReportDialogVisible.value = false
     page.value = 1
     await loadDisputes()
   } finally {

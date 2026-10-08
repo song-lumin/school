@@ -1,0 +1,18 @@
+# CodeArts 编译构建任务：frontend-build
+# 对应技术设计方案 10.3 节流水线「编译构建」阶段
+# 构建环境：Node.js 18（CodeArts 默认镜像 node18）
+
+version: 2.0
+steps:
+  BUILD:
+    - npm_install:
+        # 技术方案 10.3：cd frontend && npm install && npm run build
+        command: |
+          cd frontend
+          npm config set registry https://mirrors.huaweicloud.com/repository/npm/
+          npm ci
+          npm run build
+  Artifacts:
+    - name: frontend_dist
+      type: archive
+      value: frontend/dist/**

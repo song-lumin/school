@@ -1,20 +1,18 @@
 <template>
-  <div class="login-container">
-    <el-card class="login-card">
-      <template #header>
-        <div class="card-header">
-          <div class="brand-mark"><el-icon><Postcard /></el-icon></div>
-          <h2>欢迎回到拾回</h2>
-          <p>登录后继续管理你的线索与诚信记录</p>
-        </div>
-      </template>
+  <AuthShell>
+    <div class="auth-card">
+      <div class="auth-head">
+        <h2>欢迎回到拾回</h2>
+        <p>登录后继续管理你的线索与诚信记录</p>
+      </div>
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
+        label-position="top"
         @submit.prevent="handleLogin"
       >
-        <el-form-item prop="username">
+        <el-form-item label="用户名" prop="username">
           <el-input
             v-model="form.username"
             placeholder="请输入用户名"
@@ -22,7 +20,7 @@
             size="large"
           />
         </el-form-item>
-        <el-form-item prop="password">
+        <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
             type="password"
@@ -38,19 +36,15 @@
             size="large"
             :loading="loading"
             style="width: 100%"
-            @click="handleLogin"
+            native-type="submit"
           >
             登录
           </el-button>
         </el-form-item>
-        <el-form-item>
-          <el-link type="primary" @click="$router.push('/register')">
-            还没有账号？立即注册
-          </el-link>
-        </el-form-item>
       </el-form>
-    </el-card>
-  </div>
+      <p class="auth-switch">还没有账号？<el-link type="primary" @click="$router.push('/register')">立即注册</el-link></p>
+    </div>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
@@ -60,6 +54,7 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { authApi } from '@/api'
 import { useUserStore } from '@/stores/user'
+import AuthShell from '@/components/AuthShell.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -100,45 +95,9 @@ const handleLogin = async () => {
 </script>
 
 <style scoped>
-.login-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  padding: 24px;
-  background: #eaf1ec;
-}
-
-.login-card {
-  width: min(420px, 100%);
-  border-top: 4px solid #26745c;
-}
-
-.card-header {
-  text-align: center;
-  padding: 8px 0 4px;
-}
-
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 14px;
-  background: #edf4ef;
-  color: #26745c;
-  font-size: 24px;
-}
-
-.card-header h2 {
-  margin: 0 0 8px;
-  color: #26332f;
-  font-size: 22px;
-}
-
-.card-header p {
-  margin: 0;
-  color: #7d8a83;
-  font-size: 13px;
-}
+.auth-card { padding: 34px clamp(22px, 4vw, 40px) 30px; background: #fff; border: 1px solid #e2e9e4; border-top: 4px solid #26745c; }
+.auth-head { margin-bottom: 22px; }
+.auth-head h2 { margin: 0; color: #26332f; font-size: 22px; font-weight: 650; }
+.auth-head p { margin-top: 8px; color: #7d8a83; font-size: 13px; }
+.auth-switch { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: #7d8a83; font-size: 13px; }
 </style>

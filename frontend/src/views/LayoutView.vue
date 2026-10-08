@@ -18,7 +18,7 @@
           <el-menu-item index="/notices">寻物启事</el-menu-item>
           <el-menu-item index="/claims" v-if="userStore.isLoggedIn">认领管理</el-menu-item>
           <el-menu-item index="/disputes" v-if="userStore.isLoggedIn">申诉中心</el-menu-item>
-          <el-menu-item index="/certificates" v-if="userStore.isLoggedIn">诚信证书</el-menu-item>
+          <el-menu-item index="/certificates" v-if="userStore.isLoggedIn && !userStore.isAdmin && !userStore.isPointAdmin">诚信证书</el-menu-item>
           <el-menu-item index="/profile" v-if="userStore.isLoggedIn">个人中心</el-menu-item>
           <el-menu-item index="/admin" v-if="userStore.isAdmin">管理后台</el-menu-item>
           <el-menu-item index="/point-admin" v-if="userStore.isPointAdmin || userStore.isAdmin">点位工作台</el-menu-item>

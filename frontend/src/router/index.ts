@@ -80,7 +80,7 @@ const router = createRouter({
           path: '/certificates',
           name: 'certificates',
           component: () => import('@/views/CertificateView.vue'),
-          meta: { requiresAuth: true }
+          meta: { requiresAuth: true, forbidsAdmin: true }
         },
         {
           path: '/notices',
@@ -107,6 +107,8 @@ router.beforeEach((to, _from, next) => {
   } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
     next('/home')
   } else if (to.meta.requiresPointAdmin && !(userStore.isPointAdmin || userStore.isAdmin)) {
+    next('/home')
+  } else if (to.meta.forbidsAdmin && (userStore.isAdmin || userStore.isPointAdmin)) {
     next('/home')
   } else if ((to.path === '/login' || to.path === '/register') && userStore.isLoggedIn) {
     next('/home')

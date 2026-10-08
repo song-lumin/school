@@ -53,6 +53,8 @@ file:
 server:
   port: 8080
 
+debug: true
+
 logging:
   level:
     com.school.lostfound: debug

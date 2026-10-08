@@ -20,6 +20,9 @@ public class FoundItemRequest {
     @NotBlank(message = "拾取地点不能为空")
     private String foundLocation;
 
+    @NotNull(message = "投放点不能为空")
+    private Long dropPointId;
+
     @NotNull(message = "拾取时间不能为空")
     private LocalDateTime foundTime;
 

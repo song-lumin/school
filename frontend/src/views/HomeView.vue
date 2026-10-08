@@ -127,7 +127,7 @@ import { useRouter } from 'vue-router'
 import { foundItemApi, lostNoticeApi } from '@/api'
 import type { FoundItem, LostNotice } from '@/types'
 import ImageTrail from '@/components/ImageTrail.vue'
-import { categoryTile } from '@/utils/placeholder'
+import { categoryTile, categoryTone } from '@/utils/placeholder'
 
 const router = useRouter()
 const publicCount = ref(0)
@@ -153,12 +153,6 @@ const searchItems = () => {
 }
 
 const isPlaceholderImage = (src: string) => src.includes('example.com')
-const categoryTone = (category: string) => {
-  if (category.includes('证件') || category.includes('卡')) return 'coral'
-  if (category.includes('电子')) return 'blue'
-  if (category.includes('书')) return 'yellow'
-  return 'green'
-}
 
 onMounted(async () => {
   const [itemsRes, noticesRes] = await Promise.allSettled([

@@ -3,7 +3,6 @@ package com.school.lostfound.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.school.lostfound.dto.DisputeCreateRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
-import com.school.lostfound.dto.LostItemReportRequest;
 import com.school.lostfound.service.DisputeService;
 import com.school.lostfound.vo.DisputeVO;
 import com.school.lostfound.vo.Result;
@@ -20,20 +19,12 @@ public class DisputeController {
 
     private final DisputeService disputeService;
 
-    /** 纠纷申诉（认领人在领取后24小时内提交） */
+    /** 纠纷申诉（ITEM_MISMATCH/OTHER 认领人24小时内；FALSE_CLAIM 失主发起，无时间窗口） */
     @PostMapping
     public Result<DisputeVO> createDispute(@Valid @RequestBody DisputeCreateRequest request,
                                            Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         return Result.success(disputeService.createDispute(request, userId));
-    }
-
-    /** 物品丢失申诉（发布者提交，自动生成监控调取记录） */
-    @PostMapping("/lost-report")
-    public Result<DisputeVO> createLostReport(@Valid @RequestBody LostItemReportRequest request,
-                                              Authentication authentication) {
-        Long userId = (Long) authentication.getPrincipal();
-        return Result.success(disputeService.createLostReport(request, userId));
     }
 
     @GetMapping("/my")

@@ -16,17 +16,12 @@
       </template>
 
       <el-row :gutter="16" class="stat-row">
-        <el-col :span="8">
-          <el-card shadow="never">
-            <el-statistic title="待交物" :value="pendingHandInCount" />
-          </el-card>
-        </el-col>
-        <el-col :span="8">
+        <el-col :span="12">
           <el-card shadow="never">
             <el-statistic title="待核对发分" :value="pendingCheckCount" />
           </el-card>
         </el-col>
-        <el-col :span="8">
+        <el-col :span="12">
           <el-card shadow="never">
             <el-statistic title="在站物品总数" :value="items.length" />
           </el-card>
@@ -160,7 +155,6 @@ const pickupDialogVisible = ref(false)
 const pickupClaim = ref<ClaimApply | null>(null)
 const pickupDialogRef = ref<InstanceType<typeof PickupDialog> | null>(null)
 
-const pendingHandInCount = computed(() => items.value.filter(i => i.itemStatus === 6).length)
 const pendingCheckCount = computed(() => items.value.filter(i => i.itemStatus === 1).length)
 
 const formatTime = (time: string) => {

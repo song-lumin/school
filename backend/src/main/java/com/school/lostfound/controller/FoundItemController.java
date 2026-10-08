@@ -8,10 +8,9 @@ import com.school.lostfound.vo.FoundItemVO;
 import com.school.lostfound.vo.Result;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/found-items")
@@ -43,19 +42,6 @@ public class FoundItemController {
         return Result.success(foundItemService.getById(id));
     }
 
-    @PutMapping("/{id}/hand-in")
-    public Result<Void> handIn(@PathVariable Long id,
-                               @RequestBody Map<String, Long> body,
-                               Authentication authentication) {
-        Long userId = (Long) authentication.getPrincipal();
-        Long dropPointId = body.get("dropPointId");
-        if (dropPointId == null) {
-            return Result.badRequest("站点ID不能为空");
-        }
-        foundItemService.handIn(id, dropPointId, userId);
-        return Result.success("交物成功", null);
-    }
-
     @PutMapping("/{id}/invalidate")
     public Result<Void> invalidate(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
@@ -68,5 +54,12 @@ public class FoundItemController {
         Long userId = (Long) authentication.getPrincipal();
         foundItemService.archive(id, userId);
         return Result.success("归档成功", null);
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
+    public Result<Void> deleteByAdmin(@PathVariable Long id) {
+        foundItemService.deleteByAdmin(id);
+        return Result.success("删除成功", null);
     }
 }

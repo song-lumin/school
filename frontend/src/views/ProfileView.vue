@@ -33,10 +33,10 @@
             <el-tag type="success" v-else-if="userStore.userInfo.role === 'POINT_ADMIN'">站点管理员</el-tag>
             <el-tag type="danger" v-else-if="userStore.userInfo.role === 'SYS_ADMIN'">系统管理员</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="诚信积分">
+          <el-descriptions-item v-if="isNormalUser" label="诚信积分">
             <el-tag type="warning">{{ userStore.userInfo.creditScore }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="光荣榜展示">
+          <el-descriptions-item v-if="isNormalUser" label="光荣榜展示">
             <el-switch
               v-model="allowLeaderboard"
               :active-value="1"
@@ -50,7 +50,7 @@
         <div style="margin-top: 20px">
           <el-button type="primary" @click="openEditDialog">修改信息</el-button>
           <el-button @click="passwordDialogVisible = true">修改密码</el-button>
-          <el-button type="success" plain @click="$router.push('/certificates')">诚信证书</el-button>
+          <el-button v-if="isNormalUser" type="success" plain @click="$router.push('/certificates')">诚信证书</el-button>
         </div>
       </template>
 
@@ -125,13 +125,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { authApi, creditApi } from '@/api'
 import type { CreditLog } from '@/types'
 
 const userStore = useUserStore()
+
+const isNormalUser = computed(() => userStore.userInfo?.role === 'USER')
 
 const activeTab = ref<'info' | 'credits'>('info')
 const loading = ref(false)

@@ -8,8 +8,8 @@ SET NAMES utf8mb4;
 -- ----------------------------
 INSERT INTO `user` (`username`, `password`, `real_name`, `student_id`, `phone`, `email`, `role`, `credit_score`, `status`, `allow_leaderboard`) VALUES
 ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '系统管理员', 'ADMIN001', '13800000000', 'admin@school.edu', 'SYS_ADMIN', 0, 1, 0),
-('pointadmin1', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '站点管理员1', 'PA001', '13800000001', 'pointadmin1@school.edu', 'POINT_ADMIN', 5, 1, 1),
-('pointadmin2', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '站点管理员2', 'PA002', '13800000002', 'pointadmin2@school.edu', 'POINT_ADMIN', 3, 1, 1),
+('pointadmin1', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '站点管理员1', 'PA001', '13800000001', 'pointadmin1@school.edu', 'POINT_ADMIN', 0, 1, 0),
+('pointadmin2', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '站点管理员2', 'PA002', '13800000002', 'pointadmin2@school.edu', 'POINT_ADMIN', 0, 1, 0),
 ('user1', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '张三', '2024001', '13900000001', 'user1@school.edu', 'USER', 10, 1, 1),
 ('user2', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '李四', '2024002', '13900000002', 'user2@school.edu', 'USER', 8, 1, 1),
 ('user3', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVKIUi', '王五', '2024003', '13900000003', 'user3@school.edu', 'USER', 6, 1, 1),
@@ -33,9 +33,8 @@ INSERT INTO `found_item` (`title`, `category`, `description`, `found_location`, 
 ('蓝色保温杯', '生活用品', '不锈钢保温杯，蓝色，杯身有卡通贴纸', '学生活动中心篮球场', '2024-03-21 10:00:00', '["https://example.com/image2.jpg"]', '杯身上的贴纸图案是什么？', 0, 1, 5, 2, '2024-03-21 11:00:00'),
 ('校园卡', '证件卡类', '学生校园卡，卡面有照片', '第一教学楼201教室', '2024-03-22 09:15:00', '[]', '卡片背面的学号后四位是？', 0, 1, 6, 4, '2024-03-22 10:00:00');
 
--- 状态 6：已发布待交物
-INSERT INTO `found_item` (`title`, `category`, `description`, `found_location`, `found_time`, `images`, `claim_question`, `perishable`, `item_status`, `founder_id`, `published_at`) VALUES
-('红色钱包', '钱包证件', '红色皮质钱包，内有少量现金和卡片', '宿舍区篮球场', '2024-03-23 16:00:00', '["https://example.com/image3.jpg"]', '钱包内有什么颜色的会员卡？', 0, 6, 4, '2024-03-23 16:30:00');
+INSERT INTO `found_item` (`title`, `category`, `description`, `found_location`, `found_time`, `images`, `claim_question`, `perishable`, `item_status`, `founder_id`, `drop_point_id`, `published_at`) VALUES
+('红色钱包', '钱包证件', '红色皮质钱包，内有少量现金和卡片', '宿舍区篮球场', '2024-03-23 16:00:00', '["https://example.com/image3.jpg"]', '钱包内有什么颜色的会员卡？', 0, 1, 4, 1, '2024-03-23 16:30:00');
 
 -- 状态 3：已取件
 INSERT INTO `found_item` (`title`, `category`, `description`, `found_location`, `found_time`, `images`, `claim_question`, `perishable`, `item_status`, `founder_id`, `drop_point_id`, `published_at`, `claimed_at`) VALUES
@@ -48,6 +47,7 @@ INSERT INTO `hand_in_log` (`item_id`, `drop_point_id`, `hand_in_status`, `handed
 (1, 1, 2, '2024-03-20 15:30:00', '2024-03-20 16:00:00', 2, '物品状态良好，已入库', 1, '2024-03-20 16:00:00'),
 (2, 2, 2, '2024-03-21 11:30:00', '2024-03-21 14:00:00', 3, '物品完好，已登记', 1, '2024-03-21 14:00:00'),
 (3, 4, 2, '2024-03-22 10:30:00', '2024-03-22 15:00:00', 3, '证件类物品，妥善保管', 1, '2024-03-22 15:00:00'),
+(4, 1, 1, '2024-03-23 16:30:00', NULL, NULL, NULL, 0, NULL),
 (5, 1, 2, '2024-03-18 10:00:00', '2024-03-18 11:00:00', 2, '钥匙串完好', 1, '2024-03-18 11:00:00');
 
 -- ----------------------------
@@ -72,15 +72,7 @@ INSERT INTO `credit_log` (`user_id`, `change_amount`, `operation_type`, `related
 (4, 3, 'PICKUP_ISSUE', NULL, '历史取件积分'),
 (4, 3, 'PICKUP_ISSUE', NULL, '历史取件积分'),
 (5, 3, 'PICKUP_ISSUE', NULL, '历史取件积分'),
-(6, 3, 'PICKUP_ISSUE', NULL, '历史取件积分'),
-(2, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(2, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(2, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(2, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(2, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(3, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(3, 1, 'CHECK_ISSUE', NULL, '历史巡检积分'),
-(3, 1, 'CHECK_ISSUE', NULL, '历史巡检积分');
+(6, 3, 'PICKUP_ISSUE', NULL, '历史取件积分');
 
 -- ----------------------------
 -- 插入寻物启事

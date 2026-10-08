@@ -1,67 +1,60 @@
 <template>
   <div class="detail-container" v-loading="loading">
-    <el-card v-if="item">
-      <template #header>
-        <div class="detail-header">
-          <div class="header-left">
-            <el-button link @click="$router.push('/items')">
-              <el-icon><ArrowLeft /></el-icon> 返回列表
-            </el-button>
-          </div>
-          <el-tag :type="ITEM_STATUS_MAP[item.itemStatus]?.type || 'info'">
-            {{ ITEM_STATUS_MAP[item.itemStatus]?.text || '未知' }}
-          </el-tag>
-        </div>
-      </template>
+    <template v-if="item">
+      <div class="detail-back">
+        <el-button link @click="$router.push('/items')">
+          <el-icon><ArrowLeft /></el-icon> 返回招领列表
+        </el-button>
+      </div>
 
-      <el-row :gutter="24">
-        <el-col :span="10">
-          <template v-if="item.images && item.images.length > 0">
+      <div class="detail-panel">
+        <div class="detail-visual" :class="`visual-${categoryTone(item.category)}`">
+          <template v-if="realImages(item).length > 0">
             <el-carousel
-              v-if="item.images.length > 1"
-              height="300px"
+              v-if="realImages(item).length > 1"
+              height="100%"
               indicator-position="outside"
+              class="visual-carousel"
             >
-              <el-carousel-item v-for="(img, idx) in item.images" :key="idx">
-                <el-image :src="img" fit="contain" style="width: 100%; height: 100%" :preview-src-list="item.images" />
+              <el-carousel-item v-for="(img, idx) in realImages(item)" :key="idx">
+                <el-image :src="img" fit="cover" style="width: 100%; height: 100%" :preview-src-list="realImages(item)">
+                  <template #error><div class="visual-fallback"><el-icon><Box /></el-icon></div></template>
+                </el-image>
               </el-carousel-item>
             </el-carousel>
-            <el-image v-else :src="item.images[0]" fit="contain" style="width: 100%; max-height: 300px" :preview-src-list="item.images" />
+            <el-image v-else :src="realImages(item)[0]" fit="cover" class="visual-image" :preview-src-list="realImages(item)">
+              <template #error><div class="visual-fallback"><el-icon><Box /></el-icon></div></template>
+            </el-image>
           </template>
-          <el-empty v-else description="无图片" :image-size="80" />
-        </el-col>
-        <el-col :span="14">
-          <h2 class="item-title">{{ item.title }}</h2>
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="分类">{{ item.category }}</el-descriptions-item>
-            <el-descriptions-item label="易腐品">
-              {{ item.perishable === 1 ? '是' : '否' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="拾取地点" :span="2">{{ item.foundLocation }}</el-descriptions-item>
-            <el-descriptions-item label="拾取时间" :span="2">{{ formatTime(item.foundTime) }}</el-descriptions-item>
-            <el-descriptions-item label="发布人">
-              {{ item.founderName || '匿名' }}
-              <el-tag v-if="item.newUser" size="small" type="warning">新手发布</el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="发布时间">{{ formatTime(item.publishedAt) }}</el-descriptions-item>
-            <el-descriptions-item label="存放投放点" :span="2">
-              {{ item.dropPointName || (item.itemStatus === 6 ? '待发布人交物' : '未指定') }}
-            </el-descriptions-item>
-            <el-descriptions-item label="物品描述" :span="2">
-              {{ item.description || '无描述' }}
-            </el-descriptions-item>
-          </el-descriptions>
+          <div v-else class="visual-fallback">
+            <el-icon><Box /></el-icon>
+            <span>暂无图片</span>
+          </div>
+          <span class="visual-category">{{ item.category }}</span>
+        </div>
+
+        <div class="detail-info">
+          <div class="detail-status-row">
+            <span class="status-chip" :data-status="item.itemStatus">{{ ITEM_STATUS_MAP[item.itemStatus]?.text || '未知' }}</span>
+            <span v-if="item.perishable === 1" class="perish-chip">易腐品</span>
+            <span v-if="item.newUser" class="newbie-chip">新手发布</span>
+          </div>
+          <h1 class="detail-title">{{ item.title }}</h1>
+          <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
+
+          <dl class="detail-facts">
+            <div class="fact"><dt>拾取地点</dt><dd><el-icon><Location /></el-icon>{{ item.foundLocation || '未填写' }}</dd></div>
+            <div class="fact"><dt>拾取时间</dt><dd>{{ formatTime(item.foundTime) }}</dd></div>
+            <div class="fact"><dt>发布人</dt><dd>{{ item.founderName || '匿名' }}</dd></div>
+            <div class="fact"><dt>发布时间</dt><dd>{{ formatTime(item.publishedAt) }}</dd></div>
+            <div class="fact fact-wide"><dt>存放投放点</dt><dd>{{ item.dropPointName || '未指定' }}</dd></div>
+            <div v-if="item.claimQuestion" class="fact fact-wide"><dt>防伪问题</dt><dd>{{ item.claimQuestion }}</dd></div>
+          </dl>
 
           <div class="action-bar" v-if="userStore.isLoggedIn">
             <template v-if="isMyItem">
-              <template v-if="item.itemStatus === 6">
-                <el-select v-model="selectedDropPointId" placeholder="选择投放点" style="width: 200px">
-                  <el-option v-for="p in dropPoints" :key="p.id" :label="p.name" :value="p.id" />
-                </el-select>
-                <el-button type="primary" :loading="acting" @click="handleHandIn">已投放</el-button>
-              </template>
               <el-button
-                v-if="[1, 6].includes(item.itemStatus)"
+                v-if="item.itemStatus === 1"
                 type="danger"
                 plain
                 :loading="acting"
@@ -71,7 +64,7 @@
               </el-button>
             </template>
             <template v-else-if="item.itemStatus === 1">
-              <el-button type="primary" @click="claimDialogVisible = true">这是我的，申请认领</el-button>
+              <el-button type="primary" size="large" @click="claimDialogVisible = true">这是我的，申请认领</el-button>
             </template>
             <el-button
               v-if="(isMyItem && item.itemStatus === 3) || (userStore.isAdmin && item.itemStatus === 5)"
@@ -88,53 +81,51 @@
             title="登录后可申请认领"
             type="info"
             :closable="false"
-            style="margin-top: 16px"
+            style="margin-top: 20px"
           />
-        </el-col>
-      </el-row>
-    </el-card>
-
-    <el-card v-if="item && isMyItem && item.itemStatus !== 0" style="margin-top: 20px">
-      <template #header>
-        <div class="card-header">
-          <span>收到的认领申请</span>
-          <el-button link type="primary" @click="$router.push('/claims')">全部管理</el-button>
         </div>
-      </template>
-      <el-empty description="暂无申请" v-if="claims.length === 0" :image-size="60" />
-      <el-table v-else :data="claims" size="small">
-        <el-table-column prop="claimerName" label="申请人" width="110" />
-        <el-table-column label="答案与审核提示" min-width="220">
-          <template #default="{ row }">
-            <div class="answer-review"><span>{{ row.answer }}</span><el-tag v-if="row.lowConfidence === 1" size="small" type="warning">低置信度建议</el-tag><small v-if="row.lowConfidence === 1">{{ row.confidenceReason }}</small></div>
-          </template>
-        </el-table-column>
-        <el-table-column label="来源" width="130">
-          <template #default="{ row }">
-            <el-link v-if="row.sourceNoticeId" type="primary" @click="$router.push(`/notices/${row.sourceNoticeId}`)">启事 #{{ row.sourceNoticeId }}</el-link>
-            <span v-else>直接申请</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="createdAt" label="申请时间" width="160">
-          <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column prop="applyStatus" label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag size="small" :type="CLAIM_STATUS_MAP[row.applyStatus]?.type || 'info'">
-              {{ CLAIM_STATUS_MAP[row.applyStatus]?.text || '未知' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <template v-if="row.applyStatus === 0">
-              <el-button link type="success" @click="handleApprove(row)">同意</el-button>
-              <el-button link type="danger" @click="openRejectDialog(row)">驳回</el-button>
+      </div>
+
+      <div v-if="canSeeClaims" class="claims-panel">
+        <div class="claims-heading">
+          <h2>{{ isMyItem ? '收到的认领申请' : '该物品的认领申请（管理员视图）' }}</h2>
+          <el-button link type="primary" @click="$router.push('/claims')">全部管理 <el-icon><ArrowRight /></el-icon></el-button>
+        </div>
+        <el-empty description="暂无申请" v-if="claims.length === 0" :image-size="60" />
+        <el-table v-else :data="claims" size="small">
+          <el-table-column prop="claimerName" label="申请人" width="110" />
+          <el-table-column label="答案与审核提示" min-width="220">
+            <template #default="{ row }">
+              <div class="answer-review"><span>{{ row.answer }}</span><el-tag v-if="row.lowConfidence === 1" size="small" type="warning">低置信度建议</el-tag><small v-if="row.lowConfidence === 1">{{ row.confidenceReason }}</small></div>
             </template>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+          </el-table-column>
+          <el-table-column label="来源" width="130">
+            <template #default="{ row }">
+              <el-link v-if="row.sourceNoticeId" type="primary" @click="$router.push(`/notices/${row.sourceNoticeId}`)">启事 #{{ row.sourceNoticeId }}</el-link>
+              <span v-else>直接申请</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="申请时间" width="160">
+            <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column prop="applyStatus" label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="CLAIM_STATUS_MAP[row.applyStatus]?.type || 'info'">
+                {{ CLAIM_STATUS_MAP[row.applyStatus]?.text || '未知' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150">
+            <template #default="{ row }">
+              <template v-if="row.applyStatus === 0">
+                <el-button link type="success" @click="handleApprove(row)">同意</el-button>
+                <el-button link type="danger" @click="openRejectDialog(row)">驳回</el-button>
+              </template>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </template>
 
     <el-dialog v-model="claimDialogVisible" title="申请认领" width="500px">
       <el-alert
@@ -172,10 +163,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { foundItemApi, dropPointApi, claimApi } from '@/api'
+import { foundItemApi, claimApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS_MAP, CLAIM_STATUS_MAP } from '@/types'
-import type { FoundItem, DropPoint, ClaimApply } from '@/types'
+import type { FoundItem, ClaimApply } from '@/types'
+import { categoryTone } from '@/utils/placeholder'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -183,9 +175,7 @@ const userStore = useUserStore()
 const loading = ref(false)
 const acting = ref(false)
 const item = ref<FoundItem | null>(null)
-const dropPoints = ref<DropPoint[]>([])
 const claims = ref<ClaimApply[]>([])
-const selectedDropPointId = ref<number | undefined>()
 
 const claimDialogVisible = ref(false)
 const claimAnswer = ref('')
@@ -199,6 +189,11 @@ const itemId = computed(() => route.params.id as string)
 const isMyItem = computed(() => {
   return !!item.value && userStore.userInfo?.id === item.value.founderId
 })
+const isReviewer = computed(() => isMyItem.value || userStore.isAdmin || userStore.isPointAdmin)
+const canSeeClaims = computed(() => !!item.value && isReviewer.value && item.value.itemStatus !== 0)
+
+const isPlaceholderImage = (src: string) => src.includes('example.com')
+const realImages = (item: FoundItem) => (item.images || []).filter(src => !isPlaceholderImage(src))
 
 const formatTime = (time?: string | null) => {
   if (!time) return '-'
@@ -210,22 +205,13 @@ const fetchDetail = async () => {
   try {
     const res = await foundItemApi.getById(itemId.value)
     item.value = res.data
-    if (isMyItem.value) {
+    if (canSeeClaims.value) {
       await fetchClaims()
     }
   } catch (error) {
     console.error('加载详情失败:', error)
   } finally {
     loading.value = false
-  }
-}
-
-const fetchDropPoints = async () => {
-  try {
-    const res = await dropPointApi.list()
-    dropPoints.value = res.data
-  } catch (error) {
-    console.error('加载投放点失败:', error)
   }
 }
 
@@ -236,23 +222,6 @@ const fetchClaims = async () => {
     claims.value = res.data.records
   } catch (error) {
     console.error('加载认领申请失败:', error)
-  }
-}
-
-const handleHandIn = async () => {
-  if (!selectedDropPointId.value) {
-    ElMessage.warning('请选择投放点')
-    return
-  }
-  acting.value = true
-  try {
-    await foundItemApi.handIn(itemId.value, selectedDropPointId.value)
-    ElMessage.success('交物成功，招领已公开')
-    await fetchDetail()
-  } catch (error) {
-    console.error('交物失败:', error)
-  } finally {
-    acting.value = false
   }
 }
 
@@ -361,7 +330,6 @@ const handleReject = async () => {
 
 onMounted(() => {
   fetchDetail()
-  fetchDropPoints()
 })
 </script>
 
@@ -371,29 +339,64 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-.detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.detail-back { margin: 2px 0 12px; }
+
+.detail-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e2e9e4;
 }
 
-.item-title {
-  margin: 0 0 16px 0;
-  color: #303133;
-}
+.detail-visual { position: relative; min-height: 420px; overflow: hidden; background: #81a78e; }
+.visual-carousel, .visual-carousel :deep(.el-carousel__container) { height: 100%; }
+.visual-image { display: flex; width: 100%; height: 100%; }
+.visual-image :deep(.el-image__inner) { width: 100%; height: 100%; }
+.detail-visual :deep(.el-image) { width: 100%; height: 100%; }
+.detail-visual :deep(.el-carousel__indicator) { --el-carousel-indicator-out-color: rgb(255 255 255 / 70%); }
+.visual-fallback { display: grid; place-content: center; justify-items: center; gap: 12px; width: 100%; height: 100%; color: rgb(255 255 255 / 85%); }
+.visual-fallback .el-icon { font-size: 64px; }
+.visual-fallback span { font-size: 13px; }
+.visual-category { position: absolute; right: 14px; bottom: 14px; padding: 6px 11px; background: rgb(255 255 255 / 92%); color: #43564b; font-size: 12px; }
+.visual-green { background: #81a78e; }
+.visual-coral { background: #d88770; }
+.visual-blue { background: #7899a5; }
+.visual-yellow { background: #c3a668; }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
+.detail-info { display: flex; flex-direction: column; padding: 34px clamp(22px, 3.4vw, 44px) 32px; }
+.detail-status-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.status-chip { padding: 5px 11px; font-size: 12px; font-weight: 600; color: #fff; }
+.status-chip[data-status='1'] { background: #26745c; }
+.status-chip[data-status='2'] { background: #b3661d; }
+.status-chip[data-status='3'] { background: #5a738a; }
+.status-chip[data-status='0'], .status-chip[data-status='4'], .status-chip[data-status='5'] { background: #78847c; }
+.perish-chip { padding: 5px 11px; background: #f6e3d8; color: #a04b32; font-size: 12px; font-weight: 550; }
+.newbie-chip { padding: 5px 11px; background: #f3e9cf; color: #8d6d1f; font-size: 12px; font-weight: 550; }
 
-.action-bar {
-  margin-top: 20px;
-  display: flex;
-  gap: 12px;
-}
+.detail-title { margin: 16px 0 0; color: #26332f; font-size: clamp(22px, 2.2vw, 30px); font-weight: 650; line-height: 1.4; }
+.detail-desc { margin: 14px 0 0; color: #5c6b63; font-size: 14px; line-height: 1.9; white-space: pre-wrap; }
+
+.detail-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 26px; margin: 24px 0 0; padding: 18px 0 0; border-top: 1px solid #e6ece8; }
+.fact { display: flex; flex-direction: column; gap: 4px; padding: 9px 0; }
+.fact-wide { grid-column: 1 / -1; }
+.fact dt { color: #8a968f; font-size: 12px; }
+.fact dd { display: flex; align-items: center; gap: 5px; margin: 0; color: #2c3933; font-size: 14px; font-weight: 550; }
+.fact dd .el-icon { color: #6f8f7c; }
+
+.action-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 26px; }
+
+.claims-panel { margin-top: 22px; padding: 22px 24px; background: #fff; border: 1px solid #e2e9e4; }
+.claims-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.claims-heading h2 { margin: 0; color: #26332f; font-size: 18px; font-weight: 650; }
 
 .answer-review { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .answer-review small { color: #ad7a26; font-size: 11px; }
+
+@media (max-width: 860px) {
+  .detail-panel { grid-template-columns: 1fr; }
+  .detail-visual { min-height: 280px; }
+  .detail-info { padding: 24px 20px 26px; }
+  .detail-facts { grid-template-columns: 1fr; }
+}
 </style>

@@ -18,7 +18,6 @@ import type {
   LeaderboardVO,
   DisputeVO,
   DisputeCreateRequest,
-  LostItemReportRequest,
   DisputeHandleRequest,
   RiskWarningVO,
   DashboardVO,
@@ -83,16 +82,16 @@ export const foundItemApi = {
     return request.get<any, ApiResponse<FoundItem>>(`/found-items/${id}`)
   },
 
-  handIn(id: number | string, dropPointId: number) {
-    return request.put<any, ApiResponse<void>>(`/found-items/${id}/hand-in`, { dropPointId })
-  },
-
   invalidate(id: number | string) {
     return request.put<any, ApiResponse<void>>(`/found-items/${id}/invalidate`)
   },
 
   archive(id: number | string) {
     return request.put<any, ApiResponse<void>>(`/found-items/${id}/archive`)
+  },
+
+  remove(id: number | string) {
+    return request.delete<any, ApiResponse<void>>(`/found-items/${id}`)
   }
 }
 
@@ -147,6 +146,10 @@ export const claimApi = {
 
   listMy(params?: { page?: number; size?: number }) {
     return request.get<any, ApiResponse<PageResult<ClaimApply>>>('/claims/my', { params })
+  },
+
+  listForReview(params?: { status?: number; page?: number; size?: number }) {
+    return request.get<any, ApiResponse<PageResult<ClaimApply>>>('/claims/review', { params })
   }
 }
 
@@ -206,16 +209,16 @@ export const lostNoticeApi = {
 
   close(id: number | string) {
     return request.put<any, ApiResponse<void>>(`/lost-notices/${id}/close`)
+  },
+
+  remove(id: number | string) {
+    return request.delete<any, ApiResponse<void>>(`/lost-notices/${id}`)
   }
 }
 
 export const disputeApi = {
   create(data: DisputeCreateRequest) {
     return request.post<any, ApiResponse<DisputeVO>>('/disputes', data)
-  },
-
-  createLostReport(data: LostItemReportRequest) {
-    return request.post<any, ApiResponse<DisputeVO>>('/disputes/lost-report', data)
   },
 
   listMy(params?: { page?: number; size?: number }) {
@@ -287,7 +290,7 @@ export const adminApi = {
     return request.get<any, ApiResponse<DashboardVO>>('/admin/dashboard')
   },
 
-  listUsers(params?: { keyword?: string; page?: number; size?: number }) {
+  listUsers(params?: { keyword?: string; role?: string; status?: number; page?: number; size?: number }) {
     return request.get<any, ApiResponse<PageResult<User>>>('/admin/users', { params })
   },
 

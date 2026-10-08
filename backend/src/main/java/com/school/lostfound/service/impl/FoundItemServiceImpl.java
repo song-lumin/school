@@ -8,12 +8,16 @@ import com.school.lostfound.dto.ItemQueryRequest;
 import com.school.lostfound.entity.DropPoint;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.entity.HandInLog;
+import com.school.lostfound.entity.ReportLog;
+import com.school.lostfound.entity.Dispute;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.DropPointMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
 import com.school.lostfound.mapper.HandInLogMapper;
+import com.school.lostfound.mapper.ReportLogMapper;
+import com.school.lostfound.mapper.DisputeMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.FoundItemService;
 import com.school.lostfound.service.ImageFingerprintService;
@@ -44,6 +48,8 @@ public class FoundItemServiceImpl implements FoundItemService {
     private final DropPointMapper dropPointMapper;
     private final RiskControlService riskControlService;
     private final ImageFingerprintService imageFingerprintService;
+    private final DisputeMapper disputeMapper;
+    private final ReportLogMapper reportLogMapper;
 
     @Override
     @Transactional
@@ -60,6 +66,11 @@ public class FoundItemServiceImpl implements FoundItemService {
             throw new BusinessException(404, "用户不存在");
         }
 
+        DropPoint dropPoint = dropPointMapper.selectById(request.getDropPointId());
+        if (dropPoint == null || dropPoint.getStatus() != 1) {
+            throw new BusinessException(404, "投放点不存在或已停用");
+        }
+
         FoundItem item = new FoundItem();
         item.setTitle(request.getTitle());
         item.setCategory(request.getCategory());
@@ -69,8 +80,9 @@ public class FoundItemServiceImpl implements FoundItemService {
         item.setImages(request.getImages());
         item.setClaimQuestion(request.getClaimQuestion());
         item.setPerishable(request.getPerishable() != null ? request.getPerishable() : 0);
-        item.setItemStatus(ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode());
+        item.setItemStatus(ItemStatus.PUBLIC.getCode());
         item.setFounderId(currentUserId);
+        item.setDropPointId(request.getDropPointId());
 
         if (request.getActualFounderId() != null && !request.getActualFounderId().equals(currentUserId)) {
             User actualFounder = userMapper.selectById(request.getActualFounderId());
@@ -82,6 +94,14 @@ public class FoundItemServiceImpl implements FoundItemService {
 
         item.setPublishedAt(LocalDateTime.now());
         foundItemMapper.insert(item);
+
+        HandInLog log = new HandInLog();
+        log.setItemId(item.getId());
+        log.setDropPointId(request.getDropPointId());
+        log.setHandInStatus(1);
+        log.setHandedInAt(item.getPublishedAt());
+        handInLogMapper.insert(log);
+
         try {
             imageFingerprintService.indexItemImages(item);
         } catch (RuntimeException exception) {
@@ -90,13 +110,18 @@ public class FoundItemServiceImpl implements FoundItemService {
         }
 
         return FoundItemVO.fromEntity(item, founder.getRealName(), null,
-                isNewUser(founder));
+                isNewUser(founder, item));
     }
 
     @Override
     public IPage<FoundItemVO> listPublic(ItemQueryRequest request) {
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode());
+        // 默认查公开物品；显式传 itemStatus 时按传入状态查（如冒领申诉需列出已取件物品）
+        if (request.getItemStatus() != null) {
+            wrapper.eq(FoundItem::getItemStatus, request.getItemStatus());
+        } else {
+            wrapper.eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode());
+        }
 
         if (StringUtils.hasText(request.getKeyword())) {
             wrapper.and(w -> w.like(FoundItem::getTitle, request.getKeyword())
@@ -125,43 +150,13 @@ public class FoundItemServiceImpl implements FoundItemService {
 
     @Override
     @Transactional
-    public void handIn(Long id, Long dropPointId, Long currentUserId) {
-        FoundItem item = getItemOrThrow(id);
-
-        if (!item.getFounderId().equals(currentUserId)) {
-            throw new BusinessException(403, "只有发布者可以交物");
-        }
-        if (!item.getItemStatus().equals(ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode())) {
-            throw new BusinessException(409, "物品当前状态不可交物");
-        }
-
-        DropPoint dropPoint = dropPointMapper.selectById(dropPointId);
-        if (dropPoint == null || dropPoint.getStatus() != 1) {
-            throw new BusinessException(404, "站点不存在或已停用");
-        }
-
-        item.setItemStatus(ItemStatus.PUBLIC.getCode());
-        item.setDropPointId(dropPointId);
-        foundItemMapper.updateById(item);
-
-        HandInLog log = new HandInLog();
-        log.setItemId(id);
-        log.setDropPointId(dropPointId);
-        log.setHandInStatus(1);
-        log.setHandedInAt(LocalDateTime.now());
-        handInLogMapper.insert(log);
-    }
-
-    @Override
-    @Transactional
     public void invalidate(Long id, Long currentUserId) {
         FoundItem item = getItemOrThrow(id);
 
         if (!item.getFounderId().equals(currentUserId)) {
             throw new BusinessException(403, "只有发布者可以作废");
         }
-        if (!item.getItemStatus().equals(ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode())
-                && !item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())) {
+        if (!item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())) {
             throw new BusinessException(409, "物品当前状态不可作废");
         }
 
@@ -223,7 +218,6 @@ public class FoundItemServiceImpl implements FoundItemService {
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FoundItem::getFounderId, userId)
                 .in(FoundItem::getItemStatus,
-                        ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode(),
                         ItemStatus.PUBLIC.getCode(),
                         ItemStatus.CLAIMING.getCode(),
                         ItemStatus.PICKED_UP.getCode())
@@ -259,8 +253,8 @@ public class FoundItemServiceImpl implements FoundItemService {
         Map<Long, String> founderNames = founders.stream()
                 .collect(Collectors.toMap(User::getId, User::getRealName));
 
-        Map<Long, Boolean> newUserMap = founders.stream()
-                .collect(Collectors.toMap(User::getId, this::isNewUser));
+        Map<Long, User> foundersById = founders.stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
 
         Map<Long, String> dropPointNames = dropPointIds.isEmpty() ? Map.of()
                 : dropPointMapper.selectBatchIds(dropPointIds).stream()
@@ -271,13 +265,27 @@ public class FoundItemServiceImpl implements FoundItemService {
                         item,
                         founderNames.get(item.getFounderId()),
                         dropPointNames.get(item.getDropPointId()),
-                        newUserMap.getOrDefault(item.getFounderId(), false)))
+                        isNewUser(foundersById.get(item.getFounderId()), item)))
                 .collect(Collectors.toList());
     }
 
-    private boolean isNewUser(User founder) {
-        return founder.getCreatedAt() != null
-                && founder.getCreatedAt().plusDays(NEW_USER_DAYS).isAfter(LocalDateTime.now());
+    private boolean isNewUser(User founder, FoundItem item) {
+        return founder != null && founder.getCreatedAt() != null && item.getPublishedAt() != null
+                && item.getPublishedAt().isBefore(founder.getCreatedAt().plusDays(NEW_USER_DAYS));
+    }
+
+    @Override
+    @Transactional
+    public void deleteByAdmin(Long id) {
+        FoundItem item = foundItemMapper.selectById(id);
+        if (item == null) {
+            throw new BusinessException(404, "物品不存在");
+        }
+
+        // dispute/report_log 外键无级联，需先删，否则删除被阻塞
+        disputeMapper.delete(new LambdaQueryWrapper<Dispute>().eq(Dispute::getItemId, id));
+        reportLogMapper.delete(new LambdaQueryWrapper<ReportLog>().eq(ReportLog::getItemId, id));
+        foundItemMapper.deleteById(id);
     }
 
     private FoundItem getItemOrThrow(Long id) {

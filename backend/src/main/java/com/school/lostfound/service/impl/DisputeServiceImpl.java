@@ -5,8 +5,6 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.school.lostfound.dto.DisputeCreateRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
-import com.school.lostfound.dto.LostItemReportRequest;
-import com.school.lostfound.entity.CameraLog;
 import com.school.lostfound.entity.ClaimApply;
 import com.school.lostfound.entity.CreditLog;
 import com.school.lostfound.entity.Dispute;
@@ -15,7 +13,6 @@ import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.exception.BusinessException;
-import com.school.lostfound.mapper.CameraLogMapper;
 import com.school.lostfound.mapper.ClaimApplyMapper;
 import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.DisputeMapper;
@@ -45,8 +42,8 @@ public class DisputeServiceImpl implements DisputeService {
     /** 纠纷申诉类型 */
     public static final String TYPE_ITEM_MISMATCH = "ITEM_MISMATCH";
     public static final String TYPE_OTHER = "OTHER";
-    /** 物品丢失申诉类型 */
-    public static final String TYPE_ITEM_LOST = "ITEM_LOST";
+    /** 物品被冒领（失主发起，无时间窗口） */
+    public static final String TYPE_FALSE_CLAIM = "FALSE_CLAIM";
 
     private static final int STATUS_PENDING = 0;
     private static final int STATUS_APPROVED = 1;
@@ -57,7 +54,6 @@ public class DisputeServiceImpl implements DisputeService {
     private final DisputeMapper disputeMapper;
     private final ClaimApplyMapper claimApplyMapper;
     private final FoundItemMapper foundItemMapper;
-    private final CameraLogMapper cameraLogMapper;
     private final CreditLogMapper creditLogMapper;
     private final UserMapper userMapper;
     private final CreditService creditService;
@@ -66,8 +62,16 @@ public class DisputeServiceImpl implements DisputeService {
     @Transactional
     public DisputeVO createDispute(DisputeCreateRequest request, Long currentUserId) {
         String type = request.getDisputeType();
-        if (!TYPE_ITEM_MISMATCH.equals(type) && !TYPE_OTHER.equals(type)) {
+        if (!TYPE_ITEM_MISMATCH.equals(type) && !TYPE_OTHER.equals(type) && !TYPE_FALSE_CLAIM.equals(type)) {
             throw new BusinessException(400, "无效的纠纷类型");
+        }
+
+        if (TYPE_FALSE_CLAIM.equals(type)) {
+            return createFalseClaimDispute(request, currentUserId);
+        }
+
+        if (request.getApplyId() == null) {
+            throw new BusinessException(400, "认领申请ID不能为空");
         }
 
         ClaimApply apply = claimApplyMapper.selectById(request.getApplyId());
@@ -104,45 +108,40 @@ public class DisputeServiceImpl implements DisputeService {
         return toVO(dispute, item.getTitle());
     }
 
-    @Override
-    @Transactional
-    public DisputeVO createLostReport(LostItemReportRequest request, Long currentUserId) {
+    /**
+     * 物品被冒领：任何人可声称自己是失主并发起，自动关联该物品最近一笔已完成认领订单，
+     * 真伪由管理员审核裁定，无时间窗口。
+     */
+    private DisputeVO createFalseClaimDispute(DisputeCreateRequest request, Long currentUserId) {
+        if (request.getItemId() == null) {
+            throw new BusinessException(400, "物品ID不能为空");
+        }
+
         FoundItem item = foundItemMapper.selectById(request.getItemId());
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        if (!item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())) {
-            throw new BusinessException(409, "物品当前状态不支持丢失申诉");
-        }
 
-        Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
-        if (!publisherId.equals(currentUserId)) {
-            throw new BusinessException(403, "只有发布者可以提交物品丢失申诉");
-        }
-        if (item.getDropPointId() == null) {
-            throw new BusinessException(409, "物品未交物，无站点信息，无法发起丢失申诉");
-        }
+        ClaimApply apply = claimApplyMapper.selectList(new LambdaQueryWrapper<ClaimApply>()
+                        .eq(ClaimApply::getItemId, item.getId())
+                        .eq(ClaimApply::getApplyStatus, ClaimStatus.COMPLETED.getCode())
+                        .orderByDesc(ClaimApply::getPickupTime)
+                        .last("LIMIT 1"))
+                .stream().findFirst()
+                .orElseThrow(() -> new BusinessException(409, "该物品没有已完成的认领订单，无法发起冒领申诉"));
 
         Dispute dispute = new Dispute();
         dispute.setApplicantId(currentUserId);
+        dispute.setApplyId(apply.getId());
         dispute.setItemId(item.getId());
-        dispute.setDisputeType(TYPE_ITEM_LOST);
+        dispute.setDisputeType(TYPE_FALSE_CLAIM);
         dispute.setDescription(request.getDescription());
         dispute.setEvidenceImages(request.getEvidenceImages());
         dispute.setStatus(STATUS_PENDING);
         disputeMapper.insert(dispute);
 
-        CameraLog cameraLog = new CameraLog();
-        cameraLog.setDropPointId(item.getDropPointId());
-        cameraLog.setItemId(item.getId());
-        cameraLog.setApplyReason("物品丢失申诉（工单#" + dispute.getId() + "）：" + request.getDescription());
-        cameraLog.setApplicantId(currentUserId);
-        cameraLog.setTimeRangeStart(LocalDateTime.now().minusDays(7));
-        cameraLog.setTimeRangeEnd(LocalDateTime.now());
-        cameraLog.setStatus(0);
-        cameraLogMapper.insert(cameraLog);
-
-        log.info("丢失申诉已提交：disputeId={}, itemId={}, applicant={}", dispute.getId(), item.getId(), currentUserId);
+        log.info("冒领申诉已提交：disputeId={}, itemId={}, applyId={}, applicant={}",
+                dispute.getId(), item.getId(), apply.getId(), currentUserId);
         return toVO(dispute, item.getTitle());
     }
 
@@ -241,8 +240,8 @@ public class DisputeServiceImpl implements DisputeService {
 
         if (request.getApproved()) {
             dispute.setStatus(STATUS_APPROVED);
-            if (TYPE_ITEM_LOST.equals(dispute.getDisputeType())) {
-                handleLostReportApproval(dispute, request, operatorId);
+            if (TYPE_FALSE_CLAIM.equals(dispute.getDisputeType())) {
+                handleFalseClaimApproval(dispute, request, operatorId);
             } else {
                 handleDisputeApproval(dispute, request, operatorId);
             }
@@ -254,6 +253,34 @@ public class DisputeServiceImpl implements DisputeService {
         dispute.setHandlerId(operatorId);
         dispute.setHandledAt(LocalDateTime.now());
         disputeMapper.updateById(dispute);
+    }
+
+    /** 冒领申诉通过：回滚发布人+3、认领人+1，物品重新公开待认领，真正失主走正常流程认领 */
+    private void handleFalseClaimApproval(Dispute dispute, DisputeHandleRequest request, Long operatorId) {
+        if (dispute.getApplyId() == null) {
+            throw new BusinessException(400, "冒领工单缺少关联认领申请，无法回滚积分");
+        }
+        ClaimApply apply = claimApplyMapper.selectById(dispute.getApplyId());
+        if (apply == null) {
+            throw new BusinessException(404, "关联认领申请不存在");
+        }
+        FoundItem item = foundItemMapper.selectById(dispute.getItemId());
+        if (item == null) {
+            throw new BusinessException(404, "关联物品不存在");
+        }
+
+        String reason = "冒领申诉通过（工单#" + dispute.getId() + "）：" + request.getHandlerNote();
+
+        Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
+        rollbackSingle(publisherId, "PICKUP_ISSUE", 3, item.getId(), apply.getId(), reason, operatorId);
+        rollbackSingle(publisherId, "CHECK_ISSUE", 1, item.getId(), apply.getId(), reason, operatorId);
+        rollbackSingle(apply.getClaimerId(), "PICKUP_ISSUE", 1, item.getId(), apply.getId(), reason, operatorId);
+
+        apply.setCreditRollback(1);
+        claimApplyMapper.updateById(apply);
+
+        item.setItemStatus(ItemStatus.PUBLIC.getCode());
+        foundItemMapper.updateById(item);
     }
 
     /** 纠纷申诉通过：回滚发布人+3、认领人+1，物品作废 */
@@ -282,32 +309,6 @@ public class DisputeServiceImpl implements DisputeService {
 
         item.setItemStatus(ItemStatus.VOIDED.getCode());
         foundItemMapper.updateById(item);
-    }
-
-    /** 丢失申诉通过：回滚发布人巡检+1，物品作废 */
-    private void handleLostReportApproval(Dispute dispute, DisputeHandleRequest request, Long operatorId) {
-        FoundItem item = foundItemMapper.selectById(dispute.getItemId());
-        if (item == null) {
-            throw new BusinessException(404, "关联物品不存在");
-        }
-
-        String reason = "物品丢失申诉通过（工单#" + dispute.getId() + "）：" + request.getHandlerNote();
-
-        Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
-        rollbackSingle(publisherId, "CHECK_ISSUE", 1, item.getId(), null, reason, operatorId);
-
-        item.setItemStatus(ItemStatus.VOIDED.getCode());
-        foundItemMapper.updateById(item);
-
-        cameraLogMapper.selectList(new LambdaQueryWrapper<CameraLog>()
-                        .eq(CameraLog::getItemId, item.getId()))
-                .forEach(log -> {
-                    log.setStatus(3);
-                    log.setResultNote("申诉已通过，积分已回滚");
-                    log.setHandledAt(LocalDateTime.now());
-                    log.setHandlerId(operatorId);
-                    cameraLogMapper.updateById(log);
-                });
     }
 
     private void rollbackSingle(Long userId, String operationType, int amount,

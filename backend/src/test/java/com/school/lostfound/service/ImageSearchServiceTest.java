@@ -36,7 +36,7 @@ class ImageSearchServiceTest {
         FoundItem near = item(1L, "电子产品", ItemStatus.PUBLIC.getCode());
         FoundItem far = item(2L, "电子产品", ItemStatus.PUBLIC.getCode());
         FoundItem otherCategory = item(3L, "钥匙", ItemStatus.PUBLIC.getCode());
-        FoundItem nonPublic = item(4L, "电子产品", ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode());
+        FoundItem nonPublic = item(4L, "电子产品", ItemStatus.VOIDED.getCode());
         when(foundItemMapper.selectList(any())).thenReturn(List.of(near, far, otherCategory, nonPublic));
         when(fingerprintService.hash(any())).thenReturn("0000000000000000");
         when(fingerprintService.getFingerprints(near)).thenReturn(List.of(

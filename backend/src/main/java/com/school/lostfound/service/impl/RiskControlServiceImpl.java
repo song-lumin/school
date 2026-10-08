@@ -3,11 +3,13 @@ package com.school.lostfound.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.school.lostfound.entity.ClaimApply;
 import com.school.lostfound.entity.FoundItem;
+import com.school.lostfound.entity.ItemImageFingerprint;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.mapper.ClaimApplyMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
+import com.school.lostfound.mapper.ItemImageFingerprintMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.RiskControlService;
 import com.school.lostfound.vo.RiskWarningVO;
@@ -39,6 +41,7 @@ public class RiskControlServiceImpl implements RiskControlService {
     private final FoundItemMapper foundItemMapper;
     private final ClaimApplyMapper claimApplyMapper;
     private final UserMapper userMapper;
+    private final ItemImageFingerprintMapper fingerprintMapper;
 
     @Override
     public boolean containsSensitiveWord(String text) {
@@ -119,10 +122,55 @@ public class RiskControlServiceImpl implements RiskControlService {
     }
 
     @Override
+    public List<RiskWarningVO> detectDuplicateImages() {
+        List<FoundItem> publicItems = foundItemMapper.selectList(
+                new LambdaQueryWrapper<FoundItem>().eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode()));
+        Map<Long, FoundItem> itemById = publicItems.stream().collect(Collectors.toMap(FoundItem::getId, i -> i));
+        List<ItemImageFingerprint> fingerprints = fingerprintMapper.selectList(
+                new LambdaQueryWrapper<ItemImageFingerprint>().in(ItemImageFingerprint::getItemId, itemById.keySet()));
+        Map<String, Set<Long>> itemIdsByHash = fingerprints.stream()
+                .filter(f -> itemById.containsKey(f.getItemId()))
+                .collect(Collectors.groupingBy(ItemImageFingerprint::getHashValue,
+                        Collectors.mapping(ItemImageFingerprint::getItemId, Collectors.toSet())));
+
+        Set<String> checkedPairs = new java.util.HashSet<>();
+        List<RiskWarningVO> warnings = new ArrayList<>();
+        List<String> hashes = new ArrayList<>(itemIdsByHash.keySet());
+        for (int i = 0; i < hashes.size(); i++) {
+            for (int j = i; j < hashes.size(); j++) {
+                String leftHash = hashes.get(i);
+                String rightHash = hashes.get(j);
+                int distance = DifferenceHash.distance(leftHash, rightHash);
+                if (distance > 8) continue;
+                for (Long leftId : itemIdsByHash.get(leftHash)) {
+                    for (Long rightId : itemIdsByHash.get(rightHash)) {
+                        if (leftId.equals(rightId)) continue;
+                        long firstId = Math.min(leftId, rightId);
+                        long secondId = Math.max(leftId, rightId);
+                        String pair = firstId + ":" + secondId;
+                        if (!checkedPairs.add(pair)) continue;
+                        RiskWarningVO warning = new RiskWarningVO();
+                        warning.setWarningType("DUPLICATE_IMAGE");
+                        warning.setItemIds(List.of(firstId, secondId));
+                        warning.setFirstItemTitle(itemById.get(firstId).getTitle());
+                        warning.setSecondItemTitle(itemById.get(secondId).getTitle());
+                        warning.setSimilarity(Math.max(0, Math.round((64 - distance) * 100f / 64)));
+                        warning.setCount(1);
+                        warning.setDetail("公开招领物品图片疑似重复（相似度 " + warning.getSimilarity() + "%），仅供人工审查");
+                        warnings.add(warning);
+                    }
+                }
+            }
+        }
+        return warnings;
+    }
+
+    @Override
     public List<RiskWarningVO> getAllWarnings() {
         List<RiskWarningVO> warnings = new ArrayList<>();
         warnings.addAll(detectCollusion());
         warnings.addAll(detectAbnormalClaimRate());
+        warnings.addAll(detectDuplicateImages());
         return warnings;
     }
 

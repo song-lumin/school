@@ -12,7 +12,7 @@ const CATEGORY_ICON_PATHS: Record<string, string> = {
   green: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z'
 }
 
-function categoryTone(category: string): 'coral' | 'blue' | 'yellow' | 'green' {
+export function categoryTone(category: string): 'coral' | 'blue' | 'yellow' | 'green' {
   if (category.includes('证件') || category.includes('卡')) return 'coral'
   if (category.includes('电子')) return 'blue'
   if (category.includes('书')) return 'yellow'

@@ -125,9 +125,7 @@ public class DropPointServiceImpl implements DropPointService {
 
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FoundItem::getDropPointId, dropPointId)
-                .in(FoundItem::getItemStatus,
-                        ItemStatus.PUBLISHED_NOT_HANDED_IN.getCode(),
-                        ItemStatus.PUBLIC.getCode())
+                .eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode())
                 .apply("id NOT IN (SELECT item_id FROM hand_in_log WHERE drop_point_id = {0} AND hand_in_status = 2)", dropPointId)
                 .orderByDesc(FoundItem::getPublishedAt);
         return foundItemMapper.selectList(wrapper);

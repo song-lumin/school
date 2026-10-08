@@ -6,6 +6,7 @@
           <el-radio-group v-model="activeTab" @change="handleTabChange">
             <el-radio-button value="my">我的认领申请</el-radio-button>
             <el-radio-button value="received">收到的申请</el-radio-button>
+            <el-radio-button v-if="userStore.isAdmin || userStore.isPointAdmin" value="review">待审核处理</el-radio-button>
           </el-radio-group>
         </div>
       </template>
@@ -117,6 +118,70 @@
           </el-collapse>
         </template>
       </template>
+
+      <template v-if="activeTab === 'review'">
+        <div class="review-filter">
+          <el-radio-group v-model="reviewStatus" @change="fetchReview">
+            <el-radio-button :value="-1">全部</el-radio-button>
+            <el-radio-button :value="0">待审核</el-radio-button>
+            <el-radio-button :value="4">待取件</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-table :data="reviewClaims" v-loading="loading" style="width: 100%">
+          <el-table-column prop="itemTitle" label="物品" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-link type="primary" @click="$router.push(`/items/${row.itemId}`)">
+                {{ row.itemTitle }}
+              </el-link>
+            </template>
+          </el-table-column>
+          <el-table-column prop="claimerName" label="申请人" width="110" />
+          <el-table-column label="答案与审核提示" min-width="220">
+            <template #default="{ row }">
+              <div class="answer-review"><span>{{ row.answer }}</span><el-tag v-if="row.lowConfidence === 1" size="small" type="warning">低置信度</el-tag><small v-if="row.lowConfidence === 1">{{ row.confidenceReason }}</small></div>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="110">
+            <template #default="{ row }">
+              <el-link v-if="row.sourceNoticeId" type="primary" @click="$router.push(`/notices/${row.sourceNoticeId}`)">启事 #{{ row.sourceNoticeId }}</el-link>
+              <span v-else>直接申请</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="申请时间" width="160">
+            <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column prop="applyStatus" label="状态" width="90">
+            <template #default="{ row }">
+              <el-tag size="small" :type="CLAIM_STATUS_MAP[row.applyStatus]?.type || 'info'">
+                {{ CLAIM_STATUS_MAP[row.applyStatus]?.text || '未知' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <template v-if="row.applyStatus === 0">
+                <el-button link type="success" :disabled="acting" @click="handleApprove(row)">同意</el-button>
+                <el-button link type="danger" :disabled="acting" @click="openRejectDialog(row)">驳回</el-button>
+              </template>
+              <template v-else-if="row.applyStatus === 4">
+                <el-button link type="primary" :disabled="acting" @click="openPickupDialog(row)">确认取件</el-button>
+              </template>
+              <span v-else class="no-action">-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="pagination-wrapper">
+          <el-pagination
+            v-model:current-page="reviewPage"
+            v-model:page-size="pageSize"
+            :total="reviewTotal"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            @size-change="fetchReview"
+            @current-change="fetchReview"
+          />
+        </div>
+      </template>
     </el-card>
 
     <el-dialog v-model="rejectDialogVisible" title="驳回认领" width="450px">
@@ -140,13 +205,15 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { claimApi, foundItemApi } from '@/api'
+import { useUserStore } from '@/stores/user'
 import { CLAIM_STATUS_MAP, ITEM_STATUS_MAP } from '@/types'
 import type { ClaimApply, FoundItem } from '@/types'
 import PickupDialog from '@/components/PickupDialog.vue'
 
+const userStore = useUserStore()
 const loading = ref(false)
 const acting = ref(false)
-const activeTab = ref<'my' | 'received'>('my')
+const activeTab = ref<'my' | 'received' | 'review'>('my')
 
 const claims = ref<ClaimApply[]>([])
 const myTotal = ref(0)
@@ -155,6 +222,11 @@ const pageSize = ref(10)
 
 const myItems = ref<FoundItem[]>([])
 const receivedByItem = ref<Record<number, ClaimApply[]>>({})
+
+const reviewClaims = ref<ClaimApply[]>([])
+const reviewTotal = ref(0)
+const reviewPage = ref(1)
+const reviewStatus = ref(-1)
 
 const rejectDialogVisible = ref(false)
 const rejectReason = ref('')
@@ -201,17 +273,42 @@ const fetchReceived = async () => {
   }
 }
 
+const fetchReview = async () => {
+  loading.value = true
+  try {
+    const params: { status?: number; page: number; size: number } = {
+      page: reviewPage.value,
+      size: pageSize.value
+    }
+    if (reviewStatus.value !== -1) {
+      params.status = reviewStatus.value
+    }
+    const res = await claimApi.listForReview(params)
+    reviewClaims.value = res.data.records
+    reviewTotal.value = Number(res.data.total)
+  } catch (error) {
+    console.error('加载待审核认领失败:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
 const handleTabChange = (tab: string | number | boolean | undefined) => {
   if (tab === 'received' && myItems.value.length === 0) {
     fetchReceived()
+  }
+  if (tab === 'review' && reviewClaims.value.length === 0) {
+    fetchReview()
   }
 }
 
 const refreshCurrent = () => {
   if (activeTab.value === 'my') {
     fetchMyClaims()
-  } else {
+  } else if (activeTab.value === 'received') {
     fetchReceived()
+  } else {
+    fetchReview()
   }
 }
 
@@ -276,6 +373,10 @@ onMounted(fetchMyClaims)
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.review-filter {
+  margin-bottom: 14px;
 }
 
 .pagination-wrapper {

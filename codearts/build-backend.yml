@@ -1,0 +1,29 @@
+# CodeArts 编译构建任务：backend-build
+# 对应技术设计方案 10.3 节流水线「编译构建」阶段
+# 在 CodeArts 控制台「编译构建」新建任务时，选择「YAML 化构建」，将本文件作为构建步骤
+# 构建环境：Maven 3.9 + JDK 17（CodeArts 默认镜像 maven3.9-jdk17）
+
+version: 2.0
+steps:
+  BUILD:
+    - mvn_clean_package:
+        # 技术方案 10.3：cd backend && mvn clean package -DskipTests
+        command: |
+          cd backend
+          mvn clean package -DskipTests -Dmaven.repo.local=./.m2/repository
+    - custom_command:
+        name: 上传后端 Jar 制品
+        command: |
+          # 将 Jar 包上传至 CodeArts 制品仓库（发布库）
+          mvn deploy:deploy-file \
+            -DgroupId=com.school \
+            -DartifactId=lost-found \
+            -Dversion=1.0.${BUILD_NUMBER} \
+            -Dpackaging=jar \
+            -Dfile=target/*.jar \
+            -Durl=${MAVEN_REPO_URL} \
+            -DrepositoryId=${MAVEN_REPO_ID}
+  Artifacts:
+    - name: backend_jar
+      type: package
+      value: backend/target/*.jar

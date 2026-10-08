@@ -88,7 +88,9 @@ public class LostNoticeServiceImpl implements LostNoticeService {
             wrapper.eq(LostNotice::getStatus, status);
         }
 
-        wrapper.orderByDesc(LostNotice::getCreatedAt);
+        // 进行中(status=0)排前面，已找到/已关闭(status=1/2)排后面，组内按创建时间倒序
+        wrapper.orderByAsc(LostNotice::getStatus)
+                .orderByDesc(LostNotice::getCreatedAt);
 
         IPage<LostNotice> result = lostNoticeMapper.selectPage(new Page<>(page, size), wrapper);
 
@@ -133,6 +135,15 @@ public class LostNoticeServiceImpl implements LostNoticeService {
 
         User publisher = userMapper.selectById(currentUserId);
         return LostNoticeVO.fromEntity(notice, publisher != null ? publisher.getRealName() : null);
+    }
+
+    @Override
+    public void deleteByAdmin(Long id) {
+        LostNotice notice = lostNoticeMapper.selectById(id);
+        if (notice == null) {
+            throw new BusinessException(404, "寻物启事不存在");
+        }
+        lostNoticeMapper.deleteById(id);
     }
 
     @Override

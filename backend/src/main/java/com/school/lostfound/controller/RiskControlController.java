@@ -33,4 +33,9 @@ public class RiskControlController {
     public Result<List<RiskWarningVO>> getClaimRateWarnings() {
         return Result.success(riskControlService.detectAbnormalClaimRate());
     }
+
+    @GetMapping("/duplicates")
+    public Result<List<RiskWarningVO>> getDuplicateImages() {
+        return Result.success(riskControlService.detectDuplicateImages());
+    }
 }

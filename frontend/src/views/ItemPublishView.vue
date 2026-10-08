@@ -1,16 +1,20 @@
 <template>
   <div class="publish-container">
-    <el-card>
-      <template #header>
-        <h3>发布招领</h3>
-      </template>
-      <el-form
-        ref="formRef"
-        :model="form"
-        :rules="rules"
-        label-width="110px"
-        style="max-width: 640px"
-      >
+    <div class="publish-hero">
+      <p class="hero-kicker">拾到物品 · 交给我们守护</p>
+      <h1>发布招领</h1>
+      <p class="hero-desc">填写清楚物品信息，失主就能更快找到它。发布后请将物品送到所选投放点。</p>
+    </div>
+
+    <el-form
+      ref="formRef"
+      :model="form"
+      :rules="rules"
+      label-position="top"
+      class="publish-form"
+    >
+      <section class="form-section">
+        <h2 class="section-title">物品信息</h2>
         <el-form-item label="物品标题" prop="title">
           <el-input v-model="form.title" placeholder="例如：黑色钱包一个" maxlength="100" show-word-limit />
         </el-form-item>
@@ -29,38 +33,56 @@
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="拾取地点" prop="foundLocation">
-          <el-input v-model="form.foundLocation" placeholder="例如：教学楼A栋201" maxlength="100" />
+        <div class="form-row">
+          <el-form-item label="拾取地点" prop="foundLocation" class="row-item">
+            <el-input v-model="form.foundLocation" placeholder="你在哪里捡到的，例如：图书馆三楼自习区" maxlength="100" />
+          </el-form-item>
+          <el-form-item label="拾取时间" prop="foundTime" class="row-item">
+            <el-date-picker
+              v-model="form.foundTime"
+              type="datetime"
+              placeholder="选择拾取时间"
+              style="width: 100%"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+            />
+          </el-form-item>
+        </div>
+        <el-form-item label="投放点" prop="dropPointId">
+          <el-select v-model="form.dropPointId" placeholder="你把物品放到哪个站点" style="width: 100%">
+            <el-option
+              v-for="dp in dropPoints"
+              :key="dp.id"
+              :label="`${dp.name}（${dp.location}）`"
+              :value="dp.id"
+            />
+          </el-select>
+          <div class="field-tip standalone">发布后招领立即公开，请尽快将物品送到该投放点，失主到站点认领。</div>
         </el-form-item>
-        <el-form-item label="拾取时间" prop="foundTime">
-          <el-date-picker
-            v-model="form.foundTime"
-            type="datetime"
-            placeholder="选择拾取时间"
-            style="width: 100%"
-            value-format="YYYY-MM-DDTHH:mm:ss"
-          />
-        </el-form-item>
-        <el-form-item label="物品图片">
+        <el-form-item label="物品图片" prop="images">
           <div class="upload-area">
             <el-upload
-              v-model:file-list="fileList"
+              v-model:file-list="form.images"
               :auto-upload="false"
               list-type="picture-card"
               accept="image/jpeg,image/png,image/gif"
               :on-change="handleFileChange"
+              :on-remove="handleFileRemove"
               :limit="4"
               :on-exceed="handleExceed"
             >
               <el-icon><Plus /></el-icon>
             </el-upload>
-            <div class="upload-tip">最多 4 张，每张不超过 10MB，jpg/png/gif</div>
+            <div class="upload-tip">必传，最多 4 张，每张不超过 10MB，jpg/png/gif</div>
           </div>
         </el-form-item>
         <el-form-item label="易腐品">
           <el-switch v-model="form.perishable" :active-value="1" :inactive-value="0" />
           <span class="field-tip">易腐品会提示尽快投放</span>
         </el-form-item>
+      </section>
+
+      <section class="form-section">
+        <h2 class="section-title">核验与发布</h2>
         <el-form-item label="防伪问题" prop="claimQuestion">
           <el-input
             v-model="form.claimQuestion"
@@ -84,35 +106,48 @@
             <span class="field-tip">积分发给代发人（当前账号）</span>
           </template>
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" :loading="submitting" @click="handleSubmit">发布</el-button>
-          <el-button @click="$router.back()">取消</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <div class="submit-bar">
+          <el-button type="primary" size="large" :loading="submitting" @click="handleSubmit">发布招领</el-button>
+          <el-button size="large" @click="$router.back()">取消</el-button>
+          <p class="submit-note">发布成功后，招领立即公开，请尽快将物品送到所选投放点。</p>
+        </div>
+      </section>
+    </el-form>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules, UploadFile, UploadUserFile } from 'element-plus'
-import { foundItemApi, uploadApi } from '@/api'
+import { foundItemApi, uploadApi, dropPointApi } from '@/api'
 import { ITEM_CATEGORIES } from '@/types'
+import type { DropPoint } from '@/types'
 
 const router = useRouter()
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const isProxy = ref(false)
-const fileList = ref<UploadUserFile[]>([])
+const dropPoints = ref<DropPoint[]>([])
+
+onMounted(async () => {
+  try {
+    const res = await dropPointApi.list()
+    dropPoints.value = res.data.filter((dp) => dp.status === 1)
+  } catch (error) {
+    console.error('加载投放点失败:', error)
+  }
+})
 
 const form = reactive({
   title: '',
   category: '',
   description: '',
   foundLocation: '',
+  dropPointId: undefined as number | undefined,
   foundTime: '',
+  images: [] as UploadUserFile[],
   perishable: 0,
   claimQuestion: '',
   actualFounderId: undefined as number | undefined
@@ -122,7 +157,18 @@ const rules: FormRules = {
   title: [{ required: true, message: '请输入物品标题', trigger: 'blur' }],
   category: [{ required: true, message: '请选择物品分类', trigger: 'change' }],
   foundLocation: [{ required: true, message: '请输入拾取地点', trigger: 'blur' }],
+  dropPointId: [{ required: true, message: '请选择投放点', trigger: 'change' }],
   foundTime: [{ required: true, message: '请选择拾取时间', trigger: 'change' }],
+  images: [
+    {
+      required: true,
+      validator: (_rule: unknown, _value: unknown, callback: (error?: Error) => void) => {
+        if (form.images.length === 0) callback(new Error('请至少上传 1 张物品图片'))
+        else callback()
+      },
+      trigger: 'change'
+    }
+  ],
   claimQuestion: [{ required: true, message: '请输入防伪问题', trigger: 'blur' }]
 }
 
@@ -134,18 +180,23 @@ const handleFileChange = (file: UploadFile) => {
   const isValidType = ['image/jpeg', 'image/png', 'image/gif'].includes(file.raw?.type || '')
   if (!isValidType) {
     ElMessage.error('仅支持 jpg/png/gif 格式')
-    fileList.value = fileList.value.filter((f) => f.uid !== file.uid)
+    form.images = form.images.filter((f) => f.uid !== file.uid)
     return
   }
   if ((file.raw?.size || 0) > 10 * 1024 * 1024) {
     ElMessage.error('图片不能超过 10MB')
-    fileList.value = fileList.value.filter((f) => f.uid !== file.uid)
+    form.images = form.images.filter((f) => f.uid !== file.uid)
   }
+  formRef.value?.validateField('images')
+}
+
+const handleFileRemove = () => {
+  formRef.value?.validateField('images')
 }
 
 const uploadImages = async (): Promise<string[]> => {
   const urls: string[] = []
-  for (const file of fileList.value) {
+  for (const file of form.images) {
     if (file.raw) {
       const res = await uploadApi.uploadImage(file.raw)
       urls.push(res.data)
@@ -166,13 +217,14 @@ const handleSubmit = async () => {
       category: form.category,
       description: form.description || undefined,
       foundLocation: form.foundLocation,
+      dropPointId: form.dropPointId!,
       foundTime: form.foundTime,
       images: images.length > 0 ? images : undefined,
       claimQuestion: form.claimQuestion,
       perishable: form.perishable,
       actualFounderId: isProxy.value ? form.actualFounderId : undefined
     })
-    ElMessage.success('发布成功，请尽快前往投放点交物')
+    ElMessage.success('发布成功，招领已公开，请尽快将物品送到投放点')
     router.push('/items')
   } catch (error) {
     console.error('发布失败:', error)
@@ -184,23 +236,36 @@ const handleSubmit = async () => {
 
 <style scoped>
 .publish-container {
-  max-width: 900px;
+  max-width: 860px;
   margin: 0 auto;
 }
 
-.upload-area {
-  width: 100%;
-}
+.publish-hero { margin: 4px 0 22px; }
+.hero-kicker { color: #39805e; font-size: 13px; font-weight: 550; }
+.publish-hero h1 { margin: 8px 0 0; color: #26332f; font-size: 27px; font-weight: 650; }
+.hero-desc { margin-top: 8px; color: #7d8a83; font-size: 13px; line-height: 1.7; }
 
-.upload-tip {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 4px;
-}
+.publish-form { display: flex; flex-direction: column; gap: 18px; }
+.form-section { padding: 26px clamp(18px, 3vw, 30px) 28px; background: #fff; border: 1px solid #e2e9e4; }
+.section-title { margin: 0 0 18px; padding-bottom: 12px; border-bottom: 1px solid #e6ece8; color: #26332f; font-size: 17px; font-weight: 650; }
 
-.field-tip {
-  color: #909399;
-  font-size: 12px;
-  margin-left: 10px;
+.form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.row-item { min-width: 0; }
+
+.upload-area { width: 100%; }
+.upload-area :deep(.el-upload--picture-card) { width: 96px; height: 96px; border-radius: 4px; }
+.upload-area :deep(.el-upload-list--picture-card .el-upload-list__item) { width: 96px; height: 96px; border-radius: 4px; }
+.upload-tip { color: #909399; font-size: 12px; margin-top: 4px; }
+
+.field-tip { color: #909399; font-size: 12px; margin-left: 10px; }
+.field-tip.standalone { display: block; margin: 4px 0 0; }
+
+.submit-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 4px; }
+.submit-note { flex-basis: 100%; margin: 0; color: #8a968f; font-size: 12px; }
+
+@media (max-width: 640px) {
+  .publish-hero h1 { font-size: 23px; }
+  .form-section { padding: 20px 16px 22px; }
+  .form-row { grid-template-columns: 1fr; }
 }
 </style>

@@ -70,6 +70,7 @@ export interface FoundItemRequest {
   category: string
   description?: string
   foundLocation: string
+  dropPointId?: number
   foundTime: string
   images?: string[]
   claimQuestion: string
@@ -207,13 +208,8 @@ export interface DisputeVO {
 
 export interface DisputeCreateRequest {
   disputeType: string
-  applyId: number
-  description: string
-  evidenceImages?: string[]
-}
-
-export interface LostItemReportRequest {
-  itemId: number
+  applyId?: number
+  itemId?: number
   description: string
   evidenceImages?: string[]
 }
@@ -247,7 +243,7 @@ export interface DashboardVO {
 export const DISPUTE_TYPE_MAP: Record<string, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
   ITEM_MISMATCH: { text: '物品不符', type: 'danger' },
   OTHER: { text: '其他纠纷', type: 'warning' },
-  ITEM_LOST: { text: '物品丢失申诉', type: 'primary' }
+  FALSE_CLAIM: { text: '物品被冒领', type: 'primary' }
 }
 
 export const DISPUTE_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
@@ -303,8 +299,7 @@ export const ITEM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'suc
   2: { text: '认领中', type: 'warning' },
   3: { text: '已取件', type: 'primary' },
   4: { text: '已归档', type: 'info' },
-  5: { text: '已过期', type: 'info' },
-  6: { text: '待交物', type: 'warning' }
+  5: { text: '已过期', type: 'info' }
 }
 
 export const CLAIM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
@@ -321,9 +316,9 @@ export const HAND_IN_STATUS_MAP: Record<number, { text: string; type: 'info' | '
 }
 
 export const NOTICE_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
-  0: { text: '已关闭', type: 'info' },
-  1: { text: '进行中', type: 'success' },
-  2: { text: '已找到', type: 'primary' }
+  0: { text: '进行中', type: 'success' },
+  1: { text: '已找到', type: 'primary' },
+  2: { text: '已关闭', type: 'info' }
 }
 
 export const ITEM_CATEGORIES = ['电子产品', '证件卡类', '钥匙', '书籍资料', '衣物', '饰品', '生活用品', '其他']

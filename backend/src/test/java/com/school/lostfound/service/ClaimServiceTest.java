@@ -3,12 +3,15 @@ package com.school.lostfound.service;
 import com.school.lostfound.dto.ClaimApplyRequest;
 import com.school.lostfound.dto.ClaimRejectRequest;
 import com.school.lostfound.entity.ClaimApply;
+import com.school.lostfound.entity.DropPoint;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
+import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.ClaimApplyMapper;
+import com.school.lostfound.mapper.DropPointMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.impl.ClaimServiceImpl;
@@ -39,6 +42,9 @@ class ClaimServiceTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private DropPointMapper dropPointMapper;
 
     @Mock
     private CreditService creditService;
@@ -229,6 +235,7 @@ class ClaimServiceTest {
         apply.setApplyStatus(ClaimStatus.PENDING.getCode());
         when(claimApplyMapper.selectById(10L)).thenReturn(apply);
         when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
+        when(userMapper.selectById(999L)).thenReturn(null);
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> claimService.approve(10L, 999L));
@@ -247,6 +254,80 @@ class ClaimServiceTest {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> claimService.approve(10L, FOUNDER_ID));
         assertEquals(409, ex.getCode());
+    }
+
+    // ===== 管理员审核 =====
+
+    @Test
+    void approve_shouldAllowSysAdmin() {
+        ClaimApply apply = new ClaimApply();
+        apply.setId(10L);
+        apply.setItemId(ITEM_ID);
+        apply.setClaimerId(CLAIMER_ID);
+        apply.setApplyStatus(ClaimStatus.PENDING.getCode());
+        when(claimApplyMapper.selectById(10L)).thenReturn(apply);
+        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
+
+        User sysAdmin = new User();
+        sysAdmin.setId(50L);
+        sysAdmin.setRole(UserRole.SYS_ADMIN);
+        when(userMapper.selectById(50L)).thenReturn(sysAdmin);
+
+        claimService.approve(10L, 50L);
+
+        assertEquals(ClaimStatus.APPROVED_WAITING_PICKUP.getCode(), apply.getApplyStatus());
+        assertEquals(ItemStatus.CLAIMING.getCode(), publicItem.getItemStatus());
+    }
+
+    @Test
+    void approve_shouldAllowDropPointAdminOfItemSite() {
+        publicItem.setDropPointId(300L);
+        ClaimApply apply = new ClaimApply();
+        apply.setId(10L);
+        apply.setItemId(ITEM_ID);
+        apply.setClaimerId(CLAIMER_ID);
+        apply.setApplyStatus(ClaimStatus.PENDING.getCode());
+        when(claimApplyMapper.selectById(10L)).thenReturn(apply);
+        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
+
+        User pointAdmin = new User();
+        pointAdmin.setId(60L);
+        pointAdmin.setRole(UserRole.POINT_ADMIN);
+        when(userMapper.selectById(60L)).thenReturn(pointAdmin);
+
+        DropPoint point = new DropPoint();
+        point.setId(300L);
+        point.setAdminId(60L);
+        when(dropPointMapper.selectById(300L)).thenReturn(point);
+
+        claimService.approve(10L, 60L);
+
+        assertEquals(ClaimStatus.APPROVED_WAITING_PICKUP.getCode(), apply.getApplyStatus());
+    }
+
+    @Test
+    void approve_shouldRejectPointAdminOfOtherSite() {
+        publicItem.setDropPointId(300L);
+        ClaimApply apply = new ClaimApply();
+        apply.setId(10L);
+        apply.setItemId(ITEM_ID);
+        apply.setApplyStatus(ClaimStatus.PENDING.getCode());
+        when(claimApplyMapper.selectById(10L)).thenReturn(apply);
+        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
+
+        User pointAdmin = new User();
+        pointAdmin.setId(61L);
+        pointAdmin.setRole(UserRole.POINT_ADMIN);
+        when(userMapper.selectById(61L)).thenReturn(pointAdmin);
+
+        DropPoint point = new DropPoint();
+        point.setId(300L);
+        point.setAdminId(60L);
+        when(dropPointMapper.selectById(300L)).thenReturn(point);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> claimService.approve(10L, 61L));
+        assertEquals(403, ex.getCode());
     }
 
     // ===== reject: 3 次锁定 =====
@@ -300,7 +381,6 @@ class ClaimServiceTest {
         apply.setApplyStatus(ClaimStatus.APPROVED_WAITING_PICKUP.getCode());
         when(claimApplyMapper.selectById(10L)).thenReturn(apply);
         when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
-        when(userMapper.selectById(FOUNDER_ID)).thenReturn(new User());
 
         claimService.pickup(10L, "photo.jpg", "sig.png", FOUNDER_ID);
 
@@ -320,7 +400,6 @@ class ClaimServiceTest {
         apply.setApplyStatus(ClaimStatus.APPROVED_WAITING_PICKUP.getCode());
         when(claimApplyMapper.selectById(10L)).thenReturn(apply);
         when(foundItemMapper.selectById(ITEM_ID)).thenReturn(publicItem);
-        when(userMapper.selectById(FOUNDER_ID)).thenReturn(new User());
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> claimService.pickup(10L, null, null, FOUNDER_ID));

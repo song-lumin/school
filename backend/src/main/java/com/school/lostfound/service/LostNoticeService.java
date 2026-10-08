@@ -19,6 +19,8 @@ public interface LostNoticeService {
 
     LostNoticeVO close(Long id, Long currentUserId);
 
+    void deleteByAdmin(Long id);
+
     ClaimApplyVO forward(Long id, ForwardClaimRequest request, Long currentUserId);
 
     List<FoundItem> smartMatch(Long id, Long currentUserId);

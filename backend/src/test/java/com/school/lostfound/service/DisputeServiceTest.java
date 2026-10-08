@@ -2,8 +2,6 @@ package com.school.lostfound.service;
 
 import com.school.lostfound.dto.DisputeCreateRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
-import com.school.lostfound.dto.LostItemReportRequest;
-import com.school.lostfound.entity.CameraLog;
 import com.school.lostfound.entity.ClaimApply;
 import com.school.lostfound.entity.Dispute;
 import com.school.lostfound.entity.FoundItem;
@@ -12,7 +10,6 @@ import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
-import com.school.lostfound.mapper.CameraLogMapper;
 import com.school.lostfound.mapper.ClaimApplyMapper;
 import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.DisputeMapper;
@@ -39,15 +36,11 @@ class DisputeServiceTest {
 
     @Mock
     private DisputeMapper disputeMapper;
-
     @Mock
     private ClaimApplyMapper claimApplyMapper;
 
     @Mock
     private FoundItemMapper foundItemMapper;
-
-    @Mock
-    private CameraLogMapper cameraLogMapper;
 
     @Mock
     private CreditLogMapper creditLogMapper;
@@ -146,45 +139,64 @@ class DisputeServiceTest {
         assertEquals(400, ex.getCode());
     }
 
-    // ===== 丢失申诉创建 =====
+    // ===== 冒领申诉（FALSE_CLAIM）创建 =====
 
-    @Test
-    void createLostReport_shouldCreateDisputeAndCameraLog() {
-        item.setItemStatus(ItemStatus.PUBLIC.getCode());
-        item.setDropPointId(5L);
-        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(item);
-
-        LostItemReportRequest req = new LostItemReportRequest();
+    private DisputeCreateRequest falseClaimRequest() {
+        DisputeCreateRequest req = new DisputeCreateRequest();
+        req.setDisputeType("FALSE_CLAIM");
         req.setItemId(ITEM_ID);
-        req.setDescription("站点上的物品不见了");
-
-        disputeService.createLostReport(req, PUBLISHER_ID);
-
-        ArgumentCaptor<Dispute> disputeCaptor = ArgumentCaptor.forClass(Dispute.class);
-        verify(disputeMapper).insert(disputeCaptor.capture());
-        assertEquals("ITEM_LOST", disputeCaptor.getValue().getDisputeType());
-
-        ArgumentCaptor<CameraLog> cameraCaptor = ArgumentCaptor.forClass(CameraLog.class);
-        verify(cameraLogMapper).insert(cameraCaptor.capture());
-        CameraLog cameraLog = cameraCaptor.getValue();
-        assertEquals(5L, cameraLog.getDropPointId());
-        assertEquals(ITEM_ID, cameraLog.getItemId());
-        assertEquals(0, cameraLog.getStatus());
+        req.setDescription("这是我的物品，被别人冒领了");
+        return req;
     }
 
     @Test
-    void createLostReport_shouldRejectNonPublisher() {
-        item.setItemStatus(ItemStatus.PUBLIC.getCode());
-        item.setDropPointId(5L);
+    void createFalseClaim_shouldLinkLatestCompletedApply() {
+        item.setItemStatus(ItemStatus.PICKED_UP.getCode());
         when(foundItemMapper.selectById(ITEM_ID)).thenReturn(item);
+        when(claimApplyMapper.selectList(any())).thenReturn(List.of(completedApply));
 
-        LostItemReportRequest req = new LostItemReportRequest();
-        req.setItemId(ITEM_ID);
+        disputeService.createDispute(falseClaimRequest(), 999L);
+
+        ArgumentCaptor<Dispute> captor = ArgumentCaptor.forClass(Dispute.class);
+        verify(disputeMapper).insert(captor.capture());
+        assertEquals("FALSE_CLAIM", captor.getValue().getDisputeType());
+        assertEquals(APPLY_ID, captor.getValue().getApplyId());
+        assertEquals(ITEM_ID, captor.getValue().getItemId());
+        assertEquals(999L, captor.getValue().getApplicantId());
+    }
+
+    @Test
+    void createFalseClaim_shouldRejectWhenNoCompletedApply() {
+        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(item);
+        when(claimApplyMapper.selectList(any())).thenReturn(List.of());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> disputeService.createDispute(falseClaimRequest(), 999L));
+        assertEquals(409, ex.getCode());
+        verify(disputeMapper, never()).insert(any(Dispute.class));
+    }
+
+    @Test
+    void createFalseClaim_shouldRejectMissingItemId() {
+        DisputeCreateRequest req = new DisputeCreateRequest();
+        req.setDisputeType("FALSE_CLAIM");
         req.setDescription("test");
 
         BusinessException ex = assertThrows(BusinessException.class,
-                () -> disputeService.createLostReport(req, 999L));
-        assertEquals(403, ex.getCode());
+                () -> disputeService.createDispute(req, 999L));
+        assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void createFalseClaim_shouldAllowLateSubmission() {
+        completedApply.setPickupTime(LocalDateTime.now().minusHours(72));
+        item.setItemStatus(ItemStatus.PICKED_UP.getCode());
+        when(foundItemMapper.selectById(ITEM_ID)).thenReturn(item);
+        when(claimApplyMapper.selectList(any())).thenReturn(List.of(completedApply));
+
+        disputeService.createDispute(falseClaimRequest(), 999L);
+
+        verify(disputeMapper).insert(any(Dispute.class));
     }
 
     // ===== 纠纷申诉处理 =====
@@ -256,31 +268,26 @@ class DisputeServiceTest {
     }
 
     @Test
-    void handle_approvedLostReport_shouldRollbackCheckCreditOnlyAndCloseCameraLogs() {
-        Dispute dispute = pendingDispute("ITEM_LOST");
-        dispute.setApplyId(null);
-        item.setItemStatus(ItemStatus.PUBLIC.getCode());
-        item.setDropPointId(5L);
+    void handle_approvedFalseClaim_shouldRollbackCreditsAndReopenItem() {
+        Dispute dispute = pendingDispute("FALSE_CLAIM");
+        item.setItemStatus(ItemStatus.PICKED_UP.getCode());
         when(disputeMapper.selectById(50L)).thenReturn(dispute);
+        when(claimApplyMapper.selectById(APPLY_ID)).thenReturn(completedApply);
         when(foundItemMapper.selectById(ITEM_ID)).thenReturn(item);
-        when(creditLogMapper.selectCount(any())).thenReturn(1L).thenReturn(0L);
-        CameraLog cameraLog = new CameraLog();
-        cameraLog.setId(70L);
-        cameraLog.setItemId(ITEM_ID);
-        cameraLog.setStatus(0);
-        when(cameraLogMapper.selectList(any())).thenReturn(List.of(cameraLog));
+        when(creditLogMapper.selectCount(any())).thenReturn(1L).thenReturn(0L).thenReturn(1L).thenReturn(0L).thenReturn(1L).thenReturn(0L);
 
         DisputeHandleRequest req = new DisputeHandleRequest();
         req.setApproved(true);
-        req.setHandlerNote("确认丢失");
+        req.setHandlerNote("确认冒领");
 
         disputeService.handle(50L, req, ADMIN_ID);
 
-        // 仅回滚巡检积分 -1，不动 PICKUP_ISSUE
-        verify(creditService).issueCredit(eq(PUBLISHER_ID), eq(-1), eq("ROLLBACK"), eq(ITEM_ID), isNull(), contains("丢失申诉"), eq(ADMIN_ID));
-        verify(creditService, never()).issueCredit(eq(PUBLISHER_ID), eq(-3), anyString(), anyLong(), anyLong(), anyString(), anyLong());
-        assertEquals(ItemStatus.VOIDED.getCode(), item.getItemStatus());
-        assertEquals(3, cameraLog.getStatus());
+        assertEquals(1, dispute.getStatus());
+        verify(creditService).issueCredit(eq(PUBLISHER_ID), eq(-3), eq("ROLLBACK"), eq(ITEM_ID), eq(APPLY_ID), contains("工单#50"), eq(ADMIN_ID));
+        verify(creditService).issueCredit(eq(CLAIMER_ID), eq(-1), eq("ROLLBACK"), eq(ITEM_ID), eq(APPLY_ID), contains("工单#50"), eq(ADMIN_ID));
+        // 物品重新公开而非作废，真正失主可走正常流程认领
+        assertEquals(ItemStatus.PUBLIC.getCode(), item.getItemStatus());
+        assertEquals(1, completedApply.getCreditRollback());
     }
 
     @Test

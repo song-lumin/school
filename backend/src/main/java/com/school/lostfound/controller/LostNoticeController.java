@@ -14,6 +14,7 @@ import com.school.lostfound.vo.ClaimApplyVO;
 import com.school.lostfound.vo.ImageSearchResultVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -55,6 +56,13 @@ public class LostNoticeController {
     public Result<LostNoticeVO> close(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         return Result.success(lostNoticeService.close(id, userId));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
+    public Result<Void> deleteByAdmin(@PathVariable Long id) {
+        lostNoticeService.deleteByAdmin(id);
+        return Result.success("删除成功", null);
     }
 
     @GetMapping("/{id}/matches")

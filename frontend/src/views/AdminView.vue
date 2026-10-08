@@ -40,27 +40,33 @@
 
       <el-tab-pane label="用户管理" name="users">
         <el-card>
+          <el-tabs v-model="userRoleTab">
+            <el-tab-pane label="普通用户" name="USER" />
+            <el-tab-pane label="站点管理员" name="POINT_ADMIN" />
+            <el-tab-pane label="系统管理员" name="SYS_ADMIN" />
+          </el-tabs>
           <div style="margin-bottom: 12px">
             <el-input
               v-model="userKeyword"
               placeholder="搜索用户名/姓名/学号"
               style="width: 260px; margin-right: 12px"
               clearable
-              @keyup.enter="loadUsers"
+              @keyup.enter="searchUsers"
             />
-            <el-button type="primary" @click="loadUsers">搜索</el-button>
+            <el-button type="primary" @click="searchUsers">搜索</el-button>
           </div>
           <el-table :data="users" v-loading="usersLoading" stripe>
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="username" label="用户名" width="120" />
             <el-table-column prop="realName" label="姓名" width="100" />
             <el-table-column prop="studentId" label="学号" width="120" />
-            <el-table-column prop="creditScore" label="诚信分" width="90" />
-            <el-table-column label="角色" width="130">
+            <el-table-column v-if="userRoleTab !== 'SYS_ADMIN'" prop="creditScore" label="诚信分" width="90" />
+            <el-table-column v-if="userRoleTab === 'POINT_ADMIN'" label="负责站点" min-width="200">
               <template #default="{ row }">
-                <el-tag :type="row.role === 'SYS_ADMIN' ? 'danger' : row.role === 'POINT_ADMIN' ? 'warning' : 'info'">
-                  {{ row.role }}
-                </el-tag>
+                <template v-if="pointsOf(row.id).length">
+                  <el-tag v-for="p in pointsOf(row.id)" :key="p.id" size="small" style="margin-right: 6px">{{ p.name }}</el-tag>
+                </template>
+                <span v-else class="unassigned">未分配站点</span>
               </template>
             </el-table-column>
             <el-table-column label="状态" width="90">
@@ -99,7 +105,7 @@
             <el-select v-model="disputeFilter.disputeType" placeholder="类型" clearable style="width: 160px; margin-right: 12px">
               <el-option label="物品不符" value="ITEM_MISMATCH" />
               <el-option label="其他纠纷" value="OTHER" />
-              <el-option label="物品丢失申诉" value="ITEM_LOST" />
+              <el-option label="物品被冒领" value="FALSE_CLAIM" />
             </el-select>
             <el-button type="primary" @click="loadAdminDisputes">查询</el-button>
           </div>
@@ -577,6 +583,7 @@ const loadDashboard = async () => {
 const users = ref<User[]>([])
 const usersLoading = ref(false)
 const userKeyword = ref('')
+const userRoleTab = ref<'USER' | 'POINT_ADMIN' | 'SYS_ADMIN'>('USER')
 const userPage = ref(1)
 const userSize = ref(10)
 const userTotal = ref(0)
@@ -586,6 +593,7 @@ const loadUsers = async () => {
   try {
     const res = await adminApi.listUsers({
       keyword: userKeyword.value || undefined,
+      role: userRoleTab.value,
       page: userPage.value,
       size: userSize.value
     })
@@ -595,6 +603,13 @@ const loadUsers = async () => {
     usersLoading.value = false
   }
 }
+
+const searchUsers = () => {
+  userPage.value = 1
+  loadUsers()
+}
+
+const pointsOf = (adminId: number) => points.value.filter((p) => p.adminId === adminId)
 
 const setStatus = async (row: User, status: number) => {
   const { default: request } = await import('@/utils/request')
@@ -694,7 +709,7 @@ const submitCameraCreate = async () => {
   }
   cameraSubmitting.value = true
   try {
-    await cameraLogAdminApi.create({ ...form, applyReason: form.applyReason.trim() })
+    await cameraLogAdminApi.create({ ...form, dropPointId: form.dropPointId, applyReason: form.applyReason.trim() })
     ElMessage.success('调取申请已记录')
     cameraCreateVisible.value = false
     await loadCameraLogs()
@@ -839,8 +854,16 @@ const submitReportHandle = async () => {
   }
 }
 
+watch(userRoleTab, () => {
+  userPage.value = 1
+  loadUsers()
+})
+
 watch(activeTab, (tab) => {
-  if (tab === 'users' && !users.value.length) loadUsers()
+  if (tab === 'users') {
+    if (!users.value.length) loadUsers()
+    if (!points.value.length) loadPoints()
+  }
   if (tab === 'disputes' && !adminDisputes.value.length) loadAdminDisputes()
   if (tab === 'risk' && !riskWarnings.value.length) loadRisk()
   if (tab === 'camera-logs' && !cameraLogs.value.length) { loadPoints(); loadCameraLogs() }
@@ -892,5 +915,10 @@ onMounted(loadDashboard)
 .pagination {
   margin-top: 16px;
   justify-content: flex-end;
+}
+
+.unassigned {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

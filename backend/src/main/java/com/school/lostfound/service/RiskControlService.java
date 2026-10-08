@@ -14,6 +14,8 @@ public interface RiskControlService {
     /** 认领率异常：发布人历史发布中成功领取比例过低 */
     List<RiskWarningVO> detectAbnormalClaimRate();
 
+    List<RiskWarningVO> detectDuplicateImages();
+
     /** 汇总全部风控预警 */
     List<RiskWarningVO> getAllWarnings();
 }

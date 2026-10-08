@@ -16,4 +16,8 @@ public class RiskWarningVO {
     private String detail;
     /** 关键数值 */
     private Integer count;
+    private List<Long> itemIds;
+    private Integer similarity;
+    private String firstItemTitle;
+    private String secondItemTitle;
 }

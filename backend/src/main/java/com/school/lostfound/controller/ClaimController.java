@@ -44,6 +44,15 @@ public class ClaimController {
         return Result.success(claimService.listMy(userId, page, size));
     }
 
+    @GetMapping("/review")
+    public Result<IPage<ClaimApplyVO>> listForReview(@RequestParam(required = false) Integer status,
+                                                     @RequestParam(defaultValue = "1") int page,
+                                                     @RequestParam(defaultValue = "10") int size,
+                                                     Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        return Result.success(claimService.listForReview(userId, status, page, size));
+    }
+
     @GetMapping("/{id}")
     public Result<ClaimApplyVO> getById(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();

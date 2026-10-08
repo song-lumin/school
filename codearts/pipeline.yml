@@ -1,0 +1,79 @@
+# CodeArts 流水线编排配置：lost-found-pipeline
+# 对应技术设计方案 10.3 节「华为 CodeArts DevOps 流水线」
+#
+# 五阶段：代码检出 → 编译构建 → 单元测试 → 镜像构建 → 部署发布
+#
+# 使用方式：
+#   CodeArts 控制台 → 流水线 → 新建流水线 → 选择「YAML 化编排」→ 粘贴本文件
+#   或在流水线详情页「编辑(YAML)」中导入。
+#   前置条件：已创建代码仓库（CodeHub）、编译构建任务 backend-build / frontend-build、
+#             主机集群（deploy 阶段目标主机）。
+
+env:
+  codehub_repo: codehub-cn-south-1.devcloud.huaweicloud.com/<组织名>/school-lost-found.git
+  branch: master
+  docker_repo: swr.cn-south-1.myhuaweicloud.com/lost-found
+
+stages:
+  # 阶段1：代码检出（Git Clone）
+  - name: checkout
+    jobs:
+      - task: codehub-checkout
+        params:
+          repo: ${codehub_repo}
+          branch: ${branch}
+
+  # 阶段2：编译构建（Maven / npm）
+  - name: build
+    jobs:
+      - task: build-backend
+        params:
+          build_yaml: codearts/build-backend.yml
+      - task: build-frontend
+        params:
+          build_yaml: codearts/build-frontend.yml
+
+  # 阶段3：单元测试（JUnit）
+  - name: test
+    jobs:
+      - task: execute-mvn-test
+        params:
+          command: |
+            cd backend
+            mvn test
+          report: backend/target/surefire-reports/**
+          # 测试报告在流水线详情页「测试」Tab 展示
+
+  # 阶段4：镜像构建（Docker Build）
+  - name: docker-build
+    jobs:
+      - task: docker-build
+        params:
+          dockerfile: backend/Dockerfile
+          context: ./backend
+          image_name: ${docker_repo}/backend
+          image_tag: ${BUILD_NUMBER}
+      - task: docker-build
+        params:
+          dockerfile: frontend/Dockerfile
+          context: ./frontend
+          image_name: ${docker_repo}/frontend
+          image_tag: ${BUILD_NUMBER}
+        # 推送目标：SWR 制品仓库（需在流水线「服务授权」中配置 SWR 访问）
+
+  # 阶段5：部署发布（Docker Deploy）
+  - name: deploy
+    jobs:
+      - task: deploy-to-host
+        params:
+          # 目标主机需先在「部署 → 主机集群」中录入并安装 agent
+          environment: lost-found-hosts
+          script: bash codearts/deploy.sh
+        params_extra:
+          DEPLOY_DIR: /opt/school-lost-found
+          DOCKER_REPO: ${docker_repo}
+
+# 通知：流水线结束（成功/失败）发送消息通知
+notifications:
+  on_success: notify_project_members
+  on_failure: notify_project_members

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.school.lostfound.entity.CreditLog;
 import com.school.lostfound.entity.User;
+import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.UserMapper;
@@ -47,8 +48,10 @@ public class CreditQueryServiceImpl implements CreditQueryService {
 
     @Override
     public LeaderboardVO getLeaderboard(Long currentUserId, int top) {
+        // 光荣榜仅展示普通用户，管理员不参与积分体系
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(User::getAllowLeaderboard, 1)
+        wrapper.eq(User::getRole, UserRole.USER)
+                .eq(User::getAllowLeaderboard, 1)
                 .gt(User::getCreditScore, 0)
                 .orderByDesc(User::getCreditScore)
                 .last("LIMIT " + top);
@@ -63,11 +66,12 @@ public class CreditQueryServiceImpl implements CreditQueryService {
         Integer myScore = 0;
 
         User currentUser = userMapper.selectById(currentUserId);
-        if (currentUser != null) {
+        if (currentUser != null && currentUser.getRole() == UserRole.USER) {
             myScore = currentUser.getCreditScore();
             if (currentUser.getAllowLeaderboard() == 1) {
                 LambdaQueryWrapper<User> rankWrapper = new LambdaQueryWrapper<>();
-                rankWrapper.eq(User::getAllowLeaderboard, 1)
+                rankWrapper.eq(User::getRole, UserRole.USER)
+                        .eq(User::getAllowLeaderboard, 1)
                         .gt(User::getCreditScore, myScore);
                 long higherCount = userMapper.selectCount(rankWrapper);
                 if (myScore > 0) {
@@ -95,6 +99,9 @@ public class CreditQueryServiceImpl implements CreditQueryService {
         User user = userMapper.selectById(userId);
         if (user == null) {
             throw new BusinessException(404, "用户不存在");
+        }
+        if (user.getRole() != UserRole.USER) {
+            throw new BusinessException(403, "管理员不参与诚信积分体系，无需诚信证明");
         }
 
         LambdaQueryWrapper<CreditLog> wrapper = new LambdaQueryWrapper<>();

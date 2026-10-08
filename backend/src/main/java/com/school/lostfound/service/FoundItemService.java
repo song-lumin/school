@@ -14,12 +14,12 @@ public interface FoundItemService {
 
     FoundItemVO getById(Long id);
 
-    void handIn(Long id, Long dropPointId, Long currentUserId);
-
     void invalidate(Long id, Long currentUserId);
 
     void archive(Long id, Long currentUserId);
 
     IPage<FoundItemVO> listMy(Long currentUserId, ItemQueryRequest request);
+
+    void deleteByAdmin(Long id);
 
 }

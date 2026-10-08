@@ -3,6 +3,7 @@ package com.school.lostfound.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.school.lostfound.entity.CreditLog;
 import com.school.lostfound.entity.User;
+import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.UserMapper;
@@ -31,6 +32,12 @@ public class CreditServiceImpl implements CreditService {
         User user = userMapper.selectById(userId);
         if (user == null) {
             log.warn("发放积分失败：用户 {} 不存在", userId);
+            return;
+        }
+
+        // 管理员不参与诚信积分体系
+        if (user.getRole() == UserRole.POINT_ADMIN || user.getRole() == UserRole.SYS_ADMIN) {
+            log.info("用户 {} 是管理员，跳过积分发放", userId);
             return;
         }
 

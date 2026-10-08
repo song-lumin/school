@@ -6,12 +6,15 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.school.lostfound.dto.ClaimApplyRequest;
 import com.school.lostfound.dto.ClaimRejectRequest;
 import com.school.lostfound.entity.ClaimApply;
+import com.school.lostfound.entity.DropPoint;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
+import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.ClaimApplyMapper;
+import com.school.lostfound.mapper.DropPointMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.ClaimService;
@@ -44,6 +47,7 @@ public class ClaimServiceImpl implements ClaimService {
     private final ClaimApplyMapper claimApplyMapper;
     private final FoundItemMapper foundItemMapper;
     private final UserMapper userMapper;
+    private final DropPointMapper dropPointMapper;
     private final CreditService creditService;
     private final RiskControlService riskControlService;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -137,8 +141,8 @@ public class ClaimServiceImpl implements ClaimService {
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        if (!item.getFounderId().equals(currentUserId)) {
-            throw new BusinessException(403, "只有发布者可以查看认领申请");
+        if (!canReviewClaim(item, currentUserId)) {
+            throw new BusinessException(403, "只有发布者或管理员可以查看认领申请");
         }
 
         LambdaQueryWrapper<ClaimApply> wrapper = new LambdaQueryWrapper<>();
@@ -153,9 +157,9 @@ public class ClaimServiceImpl implements ClaimService {
         ClaimApply apply = getApplyOrThrow(id);
         FoundItem item = foundItemMapper.selectById(apply.getItemId());
 
-        boolean isFounder = item != null && item.getFounderId().equals(currentUserId);
         boolean isClaimer = apply.getClaimerId().equals(currentUserId);
-        if (!isFounder && !isClaimer) {
+        boolean canReview = item != null && canReviewClaim(item, currentUserId);
+        if (!canReview && !isClaimer) {
             throw new BusinessException(403, "无权查看该申请");
         }
 
@@ -171,8 +175,8 @@ public class ClaimServiceImpl implements ClaimService {
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        if (!item.getFounderId().equals(currentUserId)) {
-            throw new BusinessException(403, "只有发布者可以审核");
+        if (!canReviewClaim(item, currentUserId)) {
+            throw new BusinessException(403, "只有发布者或管理员可以审核");
         }
         if (!apply.getApplyStatus().equals(ClaimStatus.PENDING.getCode())) {
             throw new BusinessException(409, "申请当前状态不可审核");
@@ -206,8 +210,8 @@ public class ClaimServiceImpl implements ClaimService {
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        if (!item.getFounderId().equals(currentUserId)) {
-            throw new BusinessException(403, "只有发布者可以审核");
+        if (!canReviewClaim(item, currentUserId)) {
+            throw new BusinessException(403, "只有发布者或管理员可以审核");
         }
         if (!apply.getApplyStatus().equals(ClaimStatus.PENDING.getCode())) {
             throw new BusinessException(409, "申请当前状态不可审核");
@@ -244,10 +248,8 @@ public class ClaimServiceImpl implements ClaimService {
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        boolean isFounder = item.getFounderId().equals(currentUserId);
-        boolean isPointAdmin = isUserPointAdmin(currentUserId);
-        if (!isFounder && !isPointAdmin) {
-            throw new BusinessException(403, "只有发布者或站点管理员可以确认取件");
+        if (!canReviewClaim(item, currentUserId)) {
+            throw new BusinessException(403, "只有发布者或管理员可以确认取件");
         }
         if (!apply.getApplyStatus().equals(ClaimStatus.APPROVED_WAITING_PICKUP.getCode())) {
             throw new BusinessException(409, "申请当前状态不可取件");
@@ -285,9 +287,69 @@ public class ClaimServiceImpl implements ClaimService {
         return convertPage(claimApplyMapper.selectPage(new Page<>(page, size), wrapper), null);
     }
 
-    private boolean isUserPointAdmin(Long userId) {
-        User user = userMapper.selectById(userId);
-        return user != null && user.getRole() == com.school.lostfound.enums.UserRole.POINT_ADMIN;
+    @Override
+    public IPage<ClaimApplyVO> listForReview(Long currentUserId, Integer status, int page, int size) {
+        User user = userMapper.selectById(currentUserId);
+        if (user == null || (user.getRole() != UserRole.SYS_ADMIN && user.getRole() != UserRole.POINT_ADMIN)) {
+            throw new BusinessException(403, "仅管理员可以查看待审核认领");
+        }
+
+        LambdaQueryWrapper<ClaimApply> wrapper = new LambdaQueryWrapper<>();
+        if (status != null) {
+            wrapper.eq(ClaimApply::getApplyStatus, status);
+        }
+        List<Long> itemIds = reviewableItemIds(user);
+        if (itemIds != null) {
+            if (itemIds.isEmpty()) {
+                return new Page<>(page, size);
+            }
+            wrapper.in(ClaimApply::getItemId, itemIds);
+        }
+        wrapper.orderByDesc(ClaimApply::getCreatedAt);
+
+        return convertPage(claimApplyMapper.selectPage(new Page<>(page, size), wrapper), null);
+    }
+
+    /**
+     * 审核权限:发布者、系统管理员,或物品所在投放点的站点管理员。
+     */
+    private boolean canReviewClaim(FoundItem item, Long currentUserId) {
+        if (item.getFounderId().equals(currentUserId)) {
+            return true;
+        }
+        User user = userMapper.selectById(currentUserId);
+        if (user == null) {
+            return false;
+        }
+        if (user.getRole() == UserRole.SYS_ADMIN) {
+            return true;
+        }
+        if (user.getRole() == UserRole.POINT_ADMIN && item.getDropPointId() != null) {
+            DropPoint point = dropPointMapper.selectById(item.getDropPointId());
+            return point != null && currentUserId.equals(point.getAdminId());
+        }
+        return false;
+    }
+
+    /**
+     * 待审核列表范围:系统管理员看全部,站点管理员看自己站点物品+自己发布的物品。
+     */
+    private List<Long> reviewableItemIds(User user) {
+        if (user.getRole() == UserRole.SYS_ADMIN) {
+            return null;
+        }
+        List<Long> myPointIds = dropPointMapper.selectList(
+                new LambdaQueryWrapper<DropPoint>().eq(DropPoint::getAdminId, user.getId()))
+                .stream().map(DropPoint::getId).toList();
+        LambdaQueryWrapper<FoundItem> itemWrapper = new LambdaQueryWrapper<>();
+        if (myPointIds.isEmpty()) {
+            itemWrapper.eq(FoundItem::getFounderId, user.getId());
+        } else {
+            itemWrapper.and(w -> w.in(FoundItem::getDropPointId, myPointIds)
+                    .or().eq(FoundItem::getFounderId, user.getId()));
+        }
+        return foundItemMapper.selectList(itemWrapper)
+                .stream().map(FoundItem::getId).toList();
     }
 
     private IPage<ClaimApplyVO> convertPage(IPage<ClaimApply> page, FoundItem knownItem) {
