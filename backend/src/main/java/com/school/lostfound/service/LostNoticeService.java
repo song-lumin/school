@@ -26,4 +26,6 @@ public interface LostNoticeService {
     List<FoundItem> smartMatch(Long id, Long currentUserId);
 
     List<MatchResultVO> smartMatchV2(Long id, Long currentUserId);
+
+    List<FoundItem> getForwardedItems(Long noticeId);
 }

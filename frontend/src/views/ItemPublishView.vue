@@ -93,6 +93,17 @@
             show-word-limit
           />
         </el-form-item>
+        <el-form-item label="参考答案（选填，仅本人可见）">
+          <el-input
+            v-model="form.referenceAnswer"
+            type="textarea"
+            :rows="2"
+            placeholder="写下你心中的正确答案作为本人备注，用于系统智能比对失主回答的置信度；失主看不到此字段，也不用于自动判题"
+            maxlength="300"
+            show-word-limit
+          />
+          <div class="field-tip standalone">开放性问题不设标准答案，参考答案只作为发布人备注；失主回答后系统会综合答案相似度、用户信用分、历史记录自动算 0-100 置信度分，按分数排序供你人工审核。</div>
+        </el-form-item>
         <el-form-item label="代发">
           <el-switch v-model="isProxy" />
           <template v-if="isProxy">
@@ -150,6 +161,7 @@ const form = reactive({
   images: [] as UploadUserFile[],
   perishable: 0,
   claimQuestion: '',
+  referenceAnswer: '',
   actualFounderId: undefined as number | undefined
 })
 
@@ -221,6 +233,7 @@ const handleSubmit = async () => {
       foundTime: form.foundTime,
       images: images.length > 0 ? images : undefined,
       claimQuestion: form.claimQuestion,
+      referenceAnswer: form.referenceAnswer || undefined,
       perishable: form.perishable,
       actualFounderId: isProxy.value ? form.actualFounderId : undefined
     })

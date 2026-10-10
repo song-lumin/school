@@ -49,17 +49,26 @@ public class FoundItemController {
         return Result.success("作废成功", null);
     }
 
+    @PutMapping("/{id}/mark-placed")
+    public Result<Void> markPlaced(@PathVariable Long id, Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        foundItemService.markPlaced(id, userId);
+        return Result.success("已确认投放，招领公开", null);
+    }
+
+    @PutMapping("/{id}/forward")
+    public Result<Void> forwardToNotice(@PathVariable Long id,
+                                        @RequestBody java.util.Map<String, Long> body,
+                                        Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        foundItemService.forwardToNotice(id, body.get("noticeId"), userId);
+        return Result.success("已转发到寻物启事", null);
+    }
+
     @PutMapping("/{id}/archive")
     public Result<Void> archive(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         foundItemService.archive(id, userId);
         return Result.success("归档成功", null);
-    }
-
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('SYS_ADMIN')")
-    public Result<Void> deleteByAdmin(@PathVariable Long id) {
-        foundItemService.deleteByAdmin(id);
-        return Result.success("删除成功", null);
     }
 }

@@ -5,6 +5,7 @@ import com.school.lostfound.dto.DropPointRequest;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.service.DropPointService;
 import com.school.lostfound.vo.ClaimApplyVO;
+import com.school.lostfound.vo.InventoryItemVO;
 import com.school.lostfound.vo.DropPointVO;
 import com.school.lostfound.vo.Result;
 import jakarta.validation.Valid;
@@ -72,5 +73,11 @@ public class DropPointController {
         Long userId = (Long) authentication.getPrincipal();
         dropPointService.checkItem(id, request, userId);
         return Result.success("巡检完成，已发放积分", null);
+    }
+
+    @GetMapping("/{id}/inventory")
+    @PreAuthorize("hasAnyRole('POINT_ADMIN', 'SYS_ADMIN')")
+    public Result<List<InventoryItemVO>> getInventory(@PathVariable Long id) {
+        return Result.success(dropPointService.getInventory(id));
     }
 }

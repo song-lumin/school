@@ -19,6 +19,7 @@ public class LeaderboardVO {
     @AllArgsConstructor
     public static class Entry {
         private Long userId;
+        private String username;
         private String realName;
         private Integer creditScore;
     }

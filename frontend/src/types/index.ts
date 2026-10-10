@@ -63,6 +63,9 @@ export interface FoundItem {
   publishedAt: string
   claimedAt: string | null
   newUser?: boolean
+  forwardedNoticeId?: number | null
+  takedownReason?: string | null
+  appealStatus?: number | null
 }
 
 export interface FoundItemRequest {
@@ -74,6 +77,7 @@ export interface FoundItemRequest {
   foundTime: string
   images?: string[]
   claimQuestion: string
+  referenceAnswer?: string
   perishable?: number
   actualFounderId?: number
 }
@@ -147,6 +151,9 @@ export interface LostNotice {
   status: number
   publisherId: number
   publisherName?: string
+  matchedItemId?: number | null
+  takedownReason?: string | null
+  appealStatus?: number | null
   createdAt: string
 }
 
@@ -270,7 +277,9 @@ export interface ReportVO {
 
 export interface ReportCreateRequest {
   reportType: string
-  itemId: number
+  targetType?: string
+  itemId?: number
+  noticeId?: number
   description: string
   evidenceImages?: string[]
 }
@@ -299,7 +308,8 @@ export const ITEM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'suc
   2: { text: '认领中', type: 'warning' },
   3: { text: '已取件', type: 'primary' },
   4: { text: '已归档', type: 'info' },
-  5: { text: '已过期', type: 'info' }
+  5: { text: '已过期', type: 'info' },
+  6: { text: '待投放未公开', type: 'warning' }
 }
 
 export const CLAIM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {

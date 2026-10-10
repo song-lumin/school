@@ -28,6 +28,8 @@ public class FoundItem {
 
     private String claimQuestion;
 
+    private String referenceAnswer;
+
     private Integer perishable;
 
     private Integer itemStatus;
@@ -38,11 +40,27 @@ public class FoundItem {
 
     private Long dropPointId;
 
+    private Long forwardedNoticeId;
+
+    private Long forwarderId;
+
     private LocalDateTime publishedAt;
 
     private LocalDateTime claimedAt;
 
     private Integer expireWarningSent;
+
+    private String takedownReason;
+
+    private LocalDateTime takedownAt;
+
+    private Long takedownBy;
+
+    private Integer appealStatus;
+
+    private String appealReason;
+
+    private LocalDateTime appealAt;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

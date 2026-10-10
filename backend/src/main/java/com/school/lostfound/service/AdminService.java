@@ -21,4 +21,8 @@ public interface AdminService {
     List<ExpireWarningVO> getExpireWarnings();
 
     void rollbackCredit(Map<String, Object> request, Long operatorId);
+
+    void adjustCredit(Long userId, Integer newScore, String reason, Long operatorId);
+
+    java.util.List<com.school.lostfound.entity.CreditLog> userCreditLogs(Long userId);
 }

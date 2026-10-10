@@ -45,6 +45,7 @@
             <el-tab-pane label="站点管理员" name="POINT_ADMIN" />
             <el-tab-pane label="系统管理员" name="SYS_ADMIN" />
           </el-tabs>
+
           <div style="margin-bottom: 12px">
             <el-input
               v-model="userKeyword"
@@ -57,6 +58,7 @@
           </div>
           <el-table :data="users" v-loading="usersLoading" stripe>
             <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="realName" label="姓名" width="120" />
             <el-table-column prop="username" label="用户名" width="120" />
             <el-table-column prop="realName" label="姓名" width="100" />
             <el-table-column prop="studentId" label="学号" width="120" />
@@ -90,6 +92,60 @@
             layout="total, prev, pager, next"
             class="pagination"
             @current-change="loadUsers"
+          />
+        </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="举报审查" name="reports">
+        <el-card>
+          <div style="margin-bottom: 12px">
+            <el-select v-model="reportFilter.status" placeholder="状态" clearable style="width: 140px; margin-right: 12px">
+              <el-option label="待处理" :value="0" />
+              <el-option label="举报成立" :value="1" />
+              <el-option label="不成立" :value="2" />
+            </el-select>
+            <el-select v-model="reportFilter.reportType" placeholder="类型" clearable style="width: 140px; margin-right: 12px">
+              <el-option label="虚假投放" value="FAKE_PUBLISH" />
+              <el-option label="描述不符" value="DESC_MISMATCH" />
+              <el-option label="其他" value="OTHER" />
+            </el-select>
+            <el-button type="primary" @click="loadReports">查询</el-button>
+          </div>
+          <el-table :data="reports" v-loading="reportsLoading" stripe>
+            <el-table-column prop="id" label="举报号" width="80" />
+            <el-table-column label="类型" width="110">
+              <template #default="{ row }">
+                <el-tag :type="REPORT_TYPE_MAP[row.reportType]?.type || 'info'">
+                  {{ REPORT_TYPE_MAP[row.reportType]?.text || row.reportType }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reporterName" label="举报人" width="100" />
+            <el-table-column label="被举报物品" min-width="140">
+              <template #default="{ row }">{{ row.itemTitle || ('#' + row.itemId) }}</template>
+            </el-table-column>
+            <el-table-column prop="description" label="举报描述" min-width="180" show-overflow-tooltip />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="REPORT_STATUS_MAP[row.status]?.type">
+                  {{ REPORT_STATUS_MAP[row.status]?.text }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="handlerNote" label="处理意见" min-width="140" show-overflow-tooltip />
+            <el-table-column label="操作" width="110" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" :disabled="row.status !== 0" @click="openReportDialog(row)">处理</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-model:current-page="reportPage"
+            :page-size="reportSize"
+            :total="reportTotal"
+            layout="total, prev, pager, next"
+            class="pagination"
+            @current-change="loadReports"
           />
         </el-card>
       </el-tab-pane>
@@ -207,6 +263,27 @@
           <el-pagination v-model:current-page="cameraPage" :page-size="10" :total="cameraTotal" layout="total, prev, pager, next" class="pagination" @current-change="loadCameraLogs" />
         </el-card>
       </el-tab-pane>
+      <el-tab-pane label="积分管理" name="credits">
+        <el-card>
+          <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center">
+            <el-input v-model="creditKeyword" placeholder="搜索用户名/姓名" style="width:220px" clearable @keyup.enter="loadCreditBoard" />
+            <el-button type="primary" @click="loadCreditBoard">查询</el-button>
+          </div>
+          <el-table :data="creditBoard" v-loading="creditLoading" stripe max-height="600">
+            <el-table-column prop="rank" label="排名" width="70" />
+            <el-table-column prop="realName" label="姓名" width="120" />
+            <el-table-column prop="username" label="用户名" width="120" />
+            <el-table-column prop="creditScore" label="当前积分" width="100" />
+            <el-table-column label="操作" width="200">
+              <template #default="{ row }">
+                <el-button size="small" @click="openCreditLogDialog(row)">台账</el-button>
+                <el-button size="small" @click="openCreditDialog(row)">调整</el-button>
+                <el-button size="small" type="danger" plain @click="clearCredit(row)">清零</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
       <el-tab-pane label="站点管理" name="points">
         <el-card>
           <div style="margin-bottom: 12px">
@@ -243,60 +320,50 @@
         </el-card>
       </el-tab-pane>
 
-      <el-tab-pane label="举报审查" name="reports">
-        <el-card>
-          <div style="margin-bottom: 12px">
-            <el-select v-model="reportFilter.status" placeholder="状态" clearable style="width: 140px; margin-right: 12px">
-              <el-option label="待处理" :value="0" />
-              <el-option label="举报成立" :value="1" />
-              <el-option label="不成立" :value="2" />
-            </el-select>
-            <el-select v-model="reportFilter.reportType" placeholder="类型" clearable style="width: 140px; margin-right: 12px">
-              <el-option label="虚假投放" value="FAKE_PUBLISH" />
-              <el-option label="描述不符" value="DESC_MISMATCH" />
-              <el-option label="其他" value="OTHER" />
-            </el-select>
-            <el-button type="primary" @click="loadReports">查询</el-button>
-          </div>
-          <el-table :data="reports" v-loading="reportsLoading" stripe>
-            <el-table-column prop="id" label="举报号" width="80" />
-            <el-table-column label="类型" width="110">
-              <template #default="{ row }">
-                <el-tag :type="REPORT_TYPE_MAP[row.reportType]?.type || 'info'">
-                  {{ REPORT_TYPE_MAP[row.reportType]?.text || row.reportType }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="reporterName" label="举报人" width="100" />
-            <el-table-column label="被举报物品" min-width="140">
-              <template #default="{ row }">{{ row.itemTitle || ('#' + row.itemId) }}</template>
-            </el-table-column>
-            <el-table-column prop="description" label="举报描述" min-width="180" show-overflow-tooltip />
-            <el-table-column label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="REPORT_STATUS_MAP[row.status]?.type">
-                  {{ REPORT_STATUS_MAP[row.status]?.text }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="handlerNote" label="处理意见" min-width="140" show-overflow-tooltip />
-            <el-table-column label="操作" width="110" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="primary" :disabled="row.status !== 0" @click="openReportDialog(row)">处理</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <el-pagination
-            v-model:current-page="reportPage"
-            :page-size="reportSize"
-            :total="reportTotal"
-            layout="total, prev, pager, next"
-            class="pagination"
-            @current-change="loadReports"
-          />
-        </el-card>
-      </el-tab-pane>
+
+
     </el-tabs>
+
+    <el-dialog v-model="creditLogVisible" title="积分台账" width="700px">
+      <p style="margin-bottom:10px">
+        <b>{{ creditLogUser.realName || creditLogUser.username }}</b>（{{ creditLogUser.username }}）
+        当前积分：{{ creditLogUser.creditScore }}
+      </p>
+      <el-table :data="creditLogs" v-loading="creditLogLoading" size="small" stripe max-height="400">
+        <el-table-column prop="createdAt" label="时间" width="160">
+          <template #default="{ row }">{{ row.createdAt?.replace('T',' ').slice(0,16) }}</template>
+        </el-table-column>
+        <el-table-column prop="operationType" label="类型" width="140" />
+        <el-table-column prop="changeAmount" label="变动" width="80">
+          <template #default="{ row }">
+            <span :style="{color: row.changeAmount >= 0 ? '#67c23a' : '#f56c6c'}">
+              {{ row.changeAmount >= 0 ? '+' : '' }}{{ row.changeAmount }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reason" label="说明" min-width="200" show-overflow-tooltip />
+      </el-table>
+    </el-dialog>
+    <el-dialog v-model="creditDialogVisible" title="调整积分" width="420px">
+      <el-form label-width="90px">
+        <el-form-item label="用户">
+          <span>{{ creditForm.realName }}（{{ creditForm.username }}）</span>
+        </el-form-item>
+        <el-form-item label="当前积分">
+          <span>{{ creditForm.currentScore }}</span>
+        </el-form-item>
+        <el-form-item label="新积分">
+          <el-input-number v-model="creditForm.newScore" :min="0" :max="999" />
+        </el-form-item>
+        <el-form-item label="调整原因">
+          <el-input v-model="creditForm.reason" type="textarea" :rows="2" placeholder="必填，记录调整原因" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="creditDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitCreditAdjust">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 申诉处理对话框 -->
     <el-dialog v-model="handleDialogVisible" title="处理申诉工单" width="620px">
@@ -447,7 +514,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { adminApi, disputeApi, riskControlApi, reportApi, dropPointAdminApi, dropPointApi, cameraLogAdminApi } from '@/api'
+import { adminApi, disputeApi, riskControlApi, reportApi, dropPointAdminApi, dropPointApi, cameraLogAdminApi, creditApi } from '@/api'
 import type {
   DisputeVO,
   RiskWarningVO,
@@ -460,7 +527,64 @@ import type { CameraLog } from '@/api'
 import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP, REPORT_TYPE_MAP, REPORT_STATUS_MAP } from '@/types'
 
 const activeTab = ref('dashboard')
+
 const cameraLogs = ref<CameraLog[]>([])
+const creditBoard = ref<any[]>([])
+const creditLoading = ref(false)
+const creditKeyword = ref('')
+const creditLogVisible = ref(false)
+const creditLogLoading = ref(false)
+const creditLogUser = ref<any>({})
+const creditLogs = ref<any[]>([])
+const openCreditLogDialog = async (row: any) => {
+  creditLogUser.value = row
+  creditLogVisible.value = true
+  creditLogLoading.value = true
+  creditLogs.value = []
+  try {
+    const res = await adminApi.userCreditLogs(row.userId || row.id)
+    creditLogs.value = res.data?.records || res.data || []
+  } catch (e) { console.error(e) } finally { creditLogLoading.value = false }
+}
+const creditDialogVisible = ref(false)
+const creditForm = ref<any>({ userId: null, realName: '', username: '', currentScore: 0, newScore: 0, reason: '' })
+const openCreditDialog = (row: any) => {
+  creditForm.value = { userId: row.userId || row.id, realName: row.realName, username: row.username, currentScore: row.creditScore, newScore: row.creditScore, reason: '' }
+  creditDialogVisible.value = true
+}
+const submitCreditAdjust = async () => {
+  if (!creditForm.value.reason?.trim()) { ElMessage.warning('请填写调整原因'); return }
+  try {
+    await adminApi.adjustCredit(creditForm.value.userId, { newScore: creditForm.value.newScore, reason: creditForm.value.reason })
+    ElMessage.success('积分已调整')
+    creditDialogVisible.value = false
+    loadCreditBoard()
+  } catch (e: any) { ElMessage.error(e?.response?.data?.message || '调整失败') }
+}
+const clearCredit = (row: any) => {
+  creditForm.value = { userId: row.userId || row.id, realName: row.realName, username: row.username, currentScore: row.creditScore, newScore: 0, reason: '' }
+  ElMessageBox.prompt('清零该用户积分，请填写原因：', '清零积分', { inputPlaceholder: '必填' })
+    .then(({ value }) => {
+      if (!value?.trim()) throw new Error('empty')
+      return adminApi.adjustCredit(creditForm.value.userId, { newScore: 0, reason: value })
+    })
+    .then(() => { ElMessage.success('已清零'); loadCreditBoard() })
+    .catch(() => {})
+}
+const loadCreditBoard = async () => {
+  creditLoading.value = true
+  try {
+    const res = await creditApi.getLeaderboard(500)
+    let list = res.data.entries || []
+    if (creditKeyword.value) {
+      const k = creditKeyword.value.toLowerCase()
+      list = list.filter((u: any) =>
+        (u.realName || '').toLowerCase().includes(k) ||
+        (u.username || '').toLowerCase().includes(k))
+    }
+    creditBoard.value = list.map((u: any, i: number) => ({ ...u, rank: i + 1 }))
+  } catch (e) { console.error(e) } finally { creditLoading.value = false }
+}
 const cameraLoading = ref(false)
 const cameraSubmitting = ref(false)
 const cameraPage = ref(1)
@@ -860,6 +984,7 @@ watch(userRoleTab, () => {
 })
 
 watch(activeTab, (tab) => {
+  if (tab === 'credits') loadCreditBoard()
   if (tab === 'users') {
     if (!users.value.length) loadUsers()
     if (!points.value.length) loadPoints()

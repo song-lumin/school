@@ -17,6 +17,10 @@ public class ReportLog {
 
     private Long itemId;
 
+    private String targetType;
+
+    private Long noticeId;
+
     private String reportType;
 
     private String description;

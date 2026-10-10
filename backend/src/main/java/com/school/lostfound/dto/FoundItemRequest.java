@@ -31,6 +31,8 @@ public class FoundItemRequest {
     @NotBlank(message = "防伪问题不能为空")
     private String claimQuestion;
 
+    private String referenceAnswer;
+
     private Integer perishable;
 
     private Long actualFounderId;

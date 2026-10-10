@@ -75,16 +75,6 @@
               <span class="notice-meta">丢失于 {{ formatTime(notice.lostTime) }}<template v-if="notice.contactInfo"> · 联系 {{ notice.contactInfo }}</template></span>
             </div>
           </button>
-          <el-button
-            v-if="userStore.isAdmin"
-            class="card-delete"
-            type="danger"
-            :icon="Delete"
-            circle
-            size="small"
-            title="删除该启事"
-            @click.stop="handleDelete(notice)"
-          />
         </div>
       </div>
 
@@ -121,6 +111,20 @@
             show-word-limit
           />
         </el-form-item>
+        <el-form-item label="物品照片">
+          <el-upload
+            :file-list="imageList"
+            list-type="picture-card"
+            :auto-upload="false"
+            :on-change="onImageChange"
+            :on-remove="onImageRemove"
+            :limit="4"
+            accept="image/*"
+          >
+            <el-icon><Plus /></el-icon>
+          </el-upload>
+          <div style="color:#909399;font-size:12px">可选，最多 4 张</div>
+        </el-form-item>
         <el-form-item label="丢失地点">
           <el-input v-model="publishForm.lostLocation" placeholder="大概位置即可" maxlength="100" />
         </el-form-item>
@@ -147,10 +151,10 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Picture, Delete } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { Picture, Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { lostNoticeApi } from '@/api'
+import { lostNoticeApi, uploadApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { NOTICE_STATUS_MAP, ITEM_CATEGORIES } from '@/types'
 import type { LostNotice } from '@/types'
@@ -185,6 +189,15 @@ const publishForm = reactive({
   lostTime: '',
   contactInfo: ''
 })
+
+const imageList = ref<any[]>([])
+const onImageChange = (file: any) => {
+  imageList.value.push(file)
+}
+const onImageRemove = (file: any) => {
+  const idx = imageList.value.indexOf(file)
+  if (idx > -1) imageList.value.splice(idx, 1)
+}
 
 const rules: FormRules = {
   title: [{ required: true, message: '请输入启事标题', trigger: 'blur' }],
@@ -235,21 +248,6 @@ const handleReset = () => {
   fetchNotices()
 }
 
-const handleDelete = async (notice: LostNotice) => {
-  try {
-    await ElMessageBox.confirm(`确定删除启事「${notice.title}」吗？删除后不可恢复`, '提示', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    await lostNoticeApi.remove(notice.id)
-    ElMessage.success('删除成功')
-    fetchNotices()
-  } catch (error) {
-    console.error('删除启事失败:', error)
-  }
-}
-
 const handleImageChange = async (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -273,6 +271,17 @@ const handleImageChange = async (event: Event) => {
   }
 }
 
+const uploadImages = async (): Promise<string[]> => {
+  const urls: string[] = []
+  for (const f of imageList.value) {
+    if (f.raw) {
+      const res = await uploadApi.uploadImage(f.raw)
+      urls.push(res.data)
+    }
+  }
+  return urls
+}
+
 const handlePublish = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -285,10 +294,12 @@ const handlePublish = async () => {
       description: publishForm.description || undefined,
       lostLocation: publishForm.lostLocation || undefined,
       lostTime: publishForm.lostTime || undefined,
-      contactInfo: publishForm.contactInfo
+      contactInfo: publishForm.contactInfo,
+      images: await uploadImages()
     })
     ElMessage.success('寻物启事发布成功')
     publishDialogVisible.value = false
+    imageList.value = []
     Object.assign(publishForm, {
       title: '',
       category: '',

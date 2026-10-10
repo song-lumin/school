@@ -60,16 +60,6 @@
               <span class="found-meta">{{ formatTime(item.foundTime) }}<template v-if="item.dropPointName"> · {{ item.dropPointName }}</template></span>
             </div>
           </button>
-          <el-button
-            v-if="userStore.isAdmin"
-            class="card-delete"
-            type="danger"
-            :icon="Delete"
-            circle
-            size="small"
-            title="删除该招领"
-            @click.stop="handleDelete(item)"
-          />
         </div>
       </div>
 
@@ -90,8 +80,6 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
 import { foundItemApi, dropPointApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS_MAP, ITEM_CATEGORIES } from '@/types'
@@ -167,21 +155,6 @@ const handleReset = () => {
   queryForm.itemStatus = undefined
   queryForm.page = 1
   fetchItems()
-}
-
-const handleDelete = async (item: FoundItem) => {
-  try {
-    await ElMessageBox.confirm(`确定删除招领「${item.title}」吗？删除后不可恢复`, '提示', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    await foundItemApi.remove(item.id)
-    ElMessage.success('删除成功')
-    fetchItems()
-  } catch (error) {
-    console.error('删除物品失败:', error)
-  }
 }
 
 onMounted(() => {

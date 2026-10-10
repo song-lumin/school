@@ -1,10 +1,13 @@
 <template>
-  <el-dialog :model-value="visible" title="确认取件" width="560px" @update:model-value="$emit('update:visible', $event)" @closed="reset">
+  <el-dialog :model-value="visible" title="现场确认领取" width="560px" @update:model-value="$emit('update:visible', $event)" @closed="reset">
     <el-alert type="info" :closable="false" style="margin-bottom: 16px">
-      <p>请失物领取人与确认人<b>现场合影</b>，并由领取人<b>手写签名</b>确认后提交。</p>
+      <p>请确认您已在投放点找到本人失物。在认领单上填写姓名和日期，将<b>认领单与失物合影</b>拍照上传，并由领取人<b>手写签名</b>确认。</p>
     </el-alert>
 
     <el-form label-width="90px">
+      <el-form-item required label="认领人姓名">
+        <el-input v-model="claimerName" placeholder="请输入认领人姓名（用于留档）" maxlength="20" />
+      </el-form-item>
       <el-form-item required label="现场合影">
         <el-upload
           v-model:file-list="fileList"
@@ -40,7 +43,7 @@
 
     <template #footer>
       <el-button @click="$emit('update:visible', false)">取消</el-button>
-      <el-button type="primary" :loading="submitting" @click="handleSubmit">确认领取完成</el-button>
+      <el-button type="primary" :loading="submitting" @click="handleSubmit">确认是我的，完成领取</el-button>
     </template>
   </el-dialog>
 </template>
@@ -64,12 +67,14 @@ const emit = defineEmits<{
 
 const submitting = ref(false)
 const fileList = ref<UploadUserFile[]>([])
+const claimerName = ref('')
 const signatureCanvas = ref<HTMLCanvasElement | null>(null)
 const isDrawing = ref(false)
 let hasSignature = false
 
 const reset = () => {
   fileList.value = []
+  claimerName.value = ''
   hasSignature = false
 }
 
@@ -142,6 +147,10 @@ const canvasToBlob = (): Promise<Blob | null> => {
 
 const handleSubmit = async () => {
   if (!props.claimId) return
+  if (!claimerName.value.trim()) {
+    ElMessage.warning('请填写认领人姓名')
+    return
+  }
   if (fileList.value.length === 0 || !fileList.value[0].raw) {
     ElMessage.warning('请上传现场合影照片')
     return

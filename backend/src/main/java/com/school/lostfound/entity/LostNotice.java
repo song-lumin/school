@@ -34,6 +34,18 @@ public class LostNotice {
 
     private Long matchedItemId;
 
+    private String takedownReason;
+
+    private LocalDateTime takedownAt;
+
+    private Long takedownBy;
+
+    private Integer appealStatus;
+
+    private String appealReason;
+
+    private LocalDateTime appealAt;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

@@ -26,7 +26,7 @@ services:
     container_name: school-redis
     restart: always
     ports:
-      - "6379:6379"
+      - "6380:6379"
     command: redis-server --requirepass redis123456
     volumes:
       - redis-data:/data
@@ -40,7 +40,7 @@ services:
     container_name: school-backend
     restart: always
     ports:
-      - "8080:8080"
+      - "8083:8080"
     environment:
       SPRING_PROFILES_ACTIVE: prod
       MYSQL_HOST: mysql

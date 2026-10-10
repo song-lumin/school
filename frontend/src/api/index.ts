@@ -86,6 +86,14 @@ export const foundItemApi = {
     return request.put<any, ApiResponse<void>>(`/found-items/${id}/invalidate`)
   },
 
+  markPlaced(id: number | string) {
+    return request.put<any, ApiResponse<void>>(`/found-items/${id}/mark-placed`)
+  },
+
+  forwardToNotice(id: number | string, noticeId: number) {
+    return request.put<any, ApiResponse<void>>(`/found-items/${id}/forward`, { noticeId })
+  },
+
   archive(id: number | string) {
     return request.put<any, ApiResponse<void>>(`/found-items/${id}/archive`)
   },
@@ -114,6 +122,10 @@ export const dropPointApi = {
 
   getPendingPickups(id: number | string) {
     return request.get<any, ApiResponse<ClaimApply[]>>(`/drop-points/${id}/pending-pickups`)
+  },
+
+  getInventory(id: number | string) {
+    return request.get<any, ApiResponse<any[]>>(`/drop-points/${id}/inventory`)
   }
 }
 
@@ -136,12 +148,16 @@ export const claimApi = {
     return request.put<any, ApiResponse<void>>(`/claims/${id}/approve`)
   },
 
-  reject(id: number | string, data: { rejectReason: string }) {
+  reject(id: number | string, data: { rejectReason?: string }) {
     return request.put<any, ApiResponse<void>>(`/claims/${id}/reject`, data)
   },
 
   pickup(id: number | string, data?: { pickupPhoto?: string; pickupSignature?: string }) {
     return request.put<any, ApiResponse<void>>(`/claims/${id}/pickup`, data || {})
+  },
+
+  cancelPickup(id: number | string) {
+    return request.put<any, ApiResponse<void>>(`/claims/${id}/cancel-pickup`)
   },
 
   listMy(params?: { page?: number; size?: number }) {
@@ -205,6 +221,10 @@ export const lostNoticeApi = {
 
   matches(id: number | string) {
     return request.get<any, ApiResponse<Array<{ itemId: number; title: string; category: string; images: string[] | null; foundLocation: string; itemStatus: number; claimQuestion: string }>>>(`/lost-notices/${id}/matches`)
+  },
+
+  forwardedItems(id: number | string) {
+    return request.get<any, ApiResponse<FoundItem[]>>(`/lost-notices/${id}/forwarded-items`)
   },
 
   close(id: number | string) {
@@ -294,6 +314,14 @@ export const adminApi = {
     return request.get<any, ApiResponse<PageResult<User>>>('/admin/users', { params })
   },
 
+  adjustCredit(userId: number | string, data: { newScore: number; reason: string }) {
+    return request.put<any, ApiResponse<void>>(`/admin/users/${userId}/credit`, data)
+  },
+
+  userCreditLogs(userId: number | string) {
+    return request.get<any, ApiResponse<any>>(`/admin/users/${userId}/credit-logs`)
+  },
+
   getExpireWarnings() {
     return request.get<any, ApiResponse<any[]>>('/admin/expire-warnings')
   }
@@ -304,12 +332,49 @@ export const reportApi = {
     return request.post<any, ApiResponse<ReportVO>>('/reports', data)
   },
 
+  listMyReports(params?: { page?: number; size?: number }) {
+    return request.get<any, ApiResponse<PageResult<ReportVO>>>('/reports/my', { params })
+  },
   list(params?: { status?: number; reportType?: string; page?: number; size?: number }) {
     return request.get<any, ApiResponse<PageResult<ReportVO>>>('/admin/reports', { params })
   },
 
   handle(id: number | string, data: ReportHandleRequest) {
     return request.put<any, ApiResponse<void>>(`/admin/reports/${id}/handle`, data)
+  }
+}
+
+
+export const archiveApi = {
+  listItems(params: any = {}) {
+    return request.get<any, ApiResponse<any[]>>('/admin/archive/items', { params })
+  }
+}
+
+export const moderationApi = {
+  takedownItem(id: number | string, reason: string) {
+    return request.put<any, ApiResponse<void>>(`/admin/items/${id}/takedown`, { reason })
+  },
+  takedownNotice(id: number | string, reason: string) {
+    return request.put<any, ApiResponse<void>>(`/admin/notices/${id}/takedown`, { reason })
+  },
+  appealItem(id: number | string, reason: string) {
+    return request.post<any, ApiResponse<void>>(`/items/${id}/appeal`, { reason })
+  },
+  appealNotice(id: number | string, reason: string) {
+    return request.post<any, ApiResponse<void>>(`/notices/${id}/appeal`, { reason })
+  },
+  myTakedowns() {
+    return request.get<any, ApiResponse<{ items: any[]; notices: any[] }>>('/my-takedowns')
+  },
+  listAppeals() {
+    return request.get<any, ApiResponse<{ items: FoundItem[]; notices: LostNotice[] }>>('/admin/appeals')
+  },
+  handleItemAppeal(id: number | string, approved: boolean) {
+    return request.put<any, ApiResponse<void>>(`/admin/items/${id}/appeal`, { approved })
+  },
+  handleNoticeAppeal(id: number | string, approved: boolean) {
+    return request.put<any, ApiResponse<void>>(`/admin/notices/${id}/appeal`, { approved })
   }
 }
 

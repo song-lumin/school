@@ -16,6 +16,7 @@ import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.DropPointMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
 import com.school.lostfound.mapper.HandInLogMapper;
+import com.school.lostfound.mapper.LostNoticeMapper;
 import com.school.lostfound.mapper.ReportLogMapper;
 import com.school.lostfound.mapper.DisputeMapper;
 import com.school.lostfound.mapper.UserMapper;
@@ -50,6 +51,7 @@ public class FoundItemServiceImpl implements FoundItemService {
     private final ImageFingerprintService imageFingerprintService;
     private final DisputeMapper disputeMapper;
     private final ReportLogMapper reportLogMapper;
+    private final LostNoticeMapper lostNoticeMapper;
 
     @Override
     @Transactional
@@ -79,8 +81,10 @@ public class FoundItemServiceImpl implements FoundItemService {
         item.setFoundTime(request.getFoundTime());
         item.setImages(request.getImages());
         item.setClaimQuestion(request.getClaimQuestion());
+        item.setReferenceAnswer(request.getReferenceAnswer());
         item.setPerishable(request.getPerishable() != null ? request.getPerishable() : 0);
-        item.setItemStatus(ItemStatus.PUBLIC.getCode());
+        // 发布后先为"已发布待投放"(6)，不对外公开；发布人线下把实物放入投放点后点"已投放"才变公开(1)
+        item.setItemStatus(ItemStatus.PENDING_PLACEMENT.getCode());
         item.setFounderId(currentUserId);
         item.setDropPointId(request.getDropPointId());
 
@@ -95,11 +99,11 @@ public class FoundItemServiceImpl implements FoundItemService {
         item.setPublishedAt(LocalDateTime.now());
         foundItemMapper.insert(item);
 
+        // hand_in_log 初始状态0=实物未投放（发布人尚未把实物放入投放点）
         HandInLog log = new HandInLog();
         log.setItemId(item.getId());
         log.setDropPointId(request.getDropPointId());
-        log.setHandInStatus(1);
-        log.setHandedInAt(item.getPublishedAt());
+        log.setHandInStatus(0);
         handInLogMapper.insert(log);
 
         try {
@@ -156,7 +160,9 @@ public class FoundItemServiceImpl implements FoundItemService {
         if (!item.getFounderId().equals(currentUserId)) {
             throw new BusinessException(403, "只有发布者可以作废");
         }
-        if (!item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())) {
+        // 允许在待投放(6)或公开(1)状态下作废
+        if (!item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())
+                && !item.getItemStatus().equals(ItemStatus.PENDING_PLACEMENT.getCode())) {
             throw new BusinessException(409, "物品当前状态不可作废");
         }
 
@@ -170,6 +176,49 @@ public class FoundItemServiceImpl implements FoundItemService {
             log.setHandInStatus(3);
             handInLogMapper.updateById(log);
         }
+    }
+
+    @Override
+    @Transactional
+    public void markPlaced(Long id, Long currentUserId) {
+        FoundItem item = getItemOrThrow(id);
+
+        if (!item.getFounderId().equals(currentUserId)) {
+            throw new BusinessException(403, "只有发布者可以确认已投放");
+        }
+        if (!item.getItemStatus().equals(ItemStatus.PENDING_PLACEMENT.getCode())) {
+            throw new BusinessException(409, "只有待投放状态的物品可以标记已投放");
+        }
+
+        // 物品转为公开待认领
+        item.setItemStatus(ItemStatus.PUBLIC.getCode());
+        foundItemMapper.updateById(item);
+
+        // hand_in_log: 0(未投放) → 1(已放置实物待巡检)
+        LambdaQueryWrapper<HandInLog> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(HandInLog::getItemId, id);
+        HandInLog log = handInLogMapper.selectOne(wrapper);
+        if (log != null) {
+            log.setHandInStatus(1);
+            log.setHandedInAt(LocalDateTime.now());
+            handInLogMapper.updateById(log);
+        }
+    }
+
+    @Override
+    @Transactional
+    public void forwardToNotice(Long id, Long noticeId, Long currentUserId) {
+        FoundItem item = getItemOrThrow(id);
+        if (!item.getItemStatus().equals(ItemStatus.PUBLIC.getCode())
+                && !item.getItemStatus().equals(ItemStatus.CLAIMING.getCode())) {
+            throw new BusinessException(409, "只有公开中的招领可以转发");
+        }
+        if (lostNoticeMapper.selectById(noticeId) == null) {
+            throw new BusinessException(404, "寻物启事不存在");
+        }
+        item.setForwardedNoticeId(noticeId);
+        item.setForwarderId(currentUserId);
+        foundItemMapper.updateById(item);
     }
 
     @Override
@@ -254,9 +303,9 @@ public class FoundItemServiceImpl implements FoundItemService {
                 .collect(Collectors.toMap(User::getId, User::getRealName));
 
         Map<Long, User> foundersById = founders.stream()
-                .collect(Collectors.toMap(User::getId, user -> user));
+                .collect(Collectors.toMap(User::getId, user -> user, (a,b) -> a));
 
-        Map<Long, String> dropPointNames = dropPointIds.isEmpty() ? Map.of()
+        Map<Long, String> dropPointNames = dropPointIds.isEmpty() ? java.util.Collections.emptyMap()
                 : dropPointMapper.selectBatchIds(dropPointIds).stream()
                         .collect(Collectors.toMap(DropPoint::getId, DropPoint::getName));
 

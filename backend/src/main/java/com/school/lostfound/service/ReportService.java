@@ -12,4 +12,6 @@ public interface ReportService {
     IPage<ReportVO> list(Integer status, String reportType, int page, int size);
 
     void handle(Long id, ReportHandleRequest request, Long operatorId);
+
+    IPage<ReportVO> listMy(Long reporterId, int page, int size);
 }

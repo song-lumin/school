@@ -7,12 +7,14 @@ import com.school.lostfound.dto.ReportCreateRequest;
 import com.school.lostfound.dto.ReportHandleRequest;
 import com.school.lostfound.entity.CreditLog;
 import com.school.lostfound.entity.FoundItem;
+import com.school.lostfound.entity.LostNotice;
 import com.school.lostfound.entity.ReportLog;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
+import com.school.lostfound.mapper.LostNoticeMapper;
 import com.school.lostfound.mapper.ReportLogMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.CreditService;
@@ -47,6 +49,7 @@ public class ReportServiceImpl implements ReportService {
 
     private final ReportLogMapper reportLogMapper;
     private final FoundItemMapper foundItemMapper;
+    private final LostNoticeMapper lostNoticeMapper;
     private final UserMapper userMapper;
     private final CreditLogMapper creditLogMapper;
     private final CreditService creditService;
@@ -57,26 +60,48 @@ public class ReportServiceImpl implements ReportService {
         if (!VALID_TYPES.contains(request.getReportType())) {
             throw new BusinessException(400, "无效的举报类型");
         }
-
-        FoundItem item = foundItemMapper.selectById(request.getItemId());
-        if (item == null) {
-            throw new BusinessException(404, "被举报物品不存在");
-        }
-        if (reporterId.equals(item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId())) {
-            throw new BusinessException(403, "不能举报自己发布的物品");
-        }
+        String targetType = request.getTargetType() == null ? "ITEM" : request.getTargetType();
 
         ReportLog report = new ReportLog();
         report.setReporterId(reporterId);
-        report.setItemId(item.getId());
+        report.setTargetType(targetType);
         report.setReportType(request.getReportType());
         report.setDescription(request.getDescription());
         report.setEvidenceImages(request.getEvidenceImages());
         report.setStatus(STATUS_PENDING);
-        reportLogMapper.insert(report);
 
-        log.info("举报已提交：reportId={}, itemId={}, reporter={}", report.getId(), item.getId(), reporterId);
-        return toVO(report, null, item.getTitle());
+        String targetTitle;
+        if ("NOTICE".equals(targetType)) {
+            if (request.getNoticeId() == null) {
+                throw new BusinessException(400, "被举报启事ID不能为空");
+            }
+            LostNotice notice = lostNoticeMapper.selectById(request.getNoticeId());
+            if (notice == null) {
+                throw new BusinessException(404, "被举报启事不存在");
+            }
+            if (reporterId.equals(notice.getPublisherId())) {
+                throw new BusinessException(403, "不能举报自己发布的启事");
+            }
+            report.setNoticeId(notice.getId());
+            targetTitle = notice.getTitle();
+        } else {
+            if (request.getItemId() == null) {
+                throw new BusinessException(400, "被举报物品ID不能为空");
+            }
+            FoundItem item = foundItemMapper.selectById(request.getItemId());
+            if (item == null) {
+                throw new BusinessException(404, "被举报物品不存在");
+            }
+            if (reporterId.equals(item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId())) {
+                throw new BusinessException(403, "不能举报自己发布的物品");
+            }
+            report.setItemId(item.getId());
+            targetTitle = item.getTitle();
+        }
+
+        reportLogMapper.insert(report);
+        log.info("举报已提交：reportId={}, type={}", report.getId(), targetType);
+        return toVO(report, null, targetTitle);
     }
 
     @Override
@@ -143,18 +168,33 @@ public class ReportServiceImpl implements ReportService {
 
     /** 举报成立：物品作废 + 回滚发布人全部相关积分，可选封禁账号 */
     private void handleValid(ReportLog report, ReportHandleRequest request, Long operatorId) {
+        String reason = "举报成立（举报#" + report.getId() + "）：" + request.getHandlerNote();
+
+        if ("NOTICE".equals(report.getTargetType())) {
+            LostNotice notice = lostNoticeMapper.selectById(report.getNoticeId());
+            if (notice == null) {
+                throw new BusinessException(404, "关联启事不存在");
+            }
+            notice.setStatus(3); // 3=管理员下架
+            notice.setTakedownReason(reason);
+            notice.setTakedownAt(LocalDateTime.now());
+            lostNoticeMapper.updateById(notice);
+            return;
+        }
+
         FoundItem item = foundItemMapper.selectById(report.getItemId());
         if (item == null) {
             throw new BusinessException(404, "关联物品不存在");
         }
 
-        String reason = "举报成立（举报#" + report.getId() + "）：" + request.getHandlerNote();
         Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
 
         rollbackSingle(publisherId, "PICKUP_ISSUE", 3, item.getId(), reason, operatorId);
         rollbackSingle(publisherId, "CHECK_ISSUE", 1, item.getId(), reason, operatorId);
 
         item.setItemStatus(ItemStatus.VOIDED.getCode());
+        item.setTakedownReason(reason);
+        item.setTakedownAt(LocalDateTime.now());
         foundItemMapper.updateById(item);
 
         if (Boolean.TRUE.equals(request.getBanPublisher())) {
@@ -191,6 +231,26 @@ public class ReportServiceImpl implements ReportService {
         creditService.issueCredit(userId, -amount, "ROLLBACK", itemId, null, reason, operatorId);
     }
 
+
+    @Override
+    public IPage<ReportVO> listMy(Long reporterId, int page, int size) {
+        LambdaQueryWrapper<ReportLog> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ReportLog::getReporterId, reporterId)
+               .orderByDesc(ReportLog::getCreatedAt);
+        IPage<ReportLog> result = reportLogMapper.selectPage(new Page<>(page, size), wrapper);
+        List<Long> itemIds = result.getRecords().stream().map(ReportLog::getItemId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, String> itemTitles = itemIds.isEmpty() ? Map.of()
+            : foundItemMapper.selectBatchIds(itemIds).stream().collect(Collectors.toMap(FoundItem::getId, FoundItem::getTitle));
+        List<Long> noticeIds = result.getRecords().stream().map(ReportLog::getNoticeId).filter(Objects::nonNull).distinct().toList();
+        Map<Long, String> noticeTitles = noticeIds.isEmpty() ? Map.of()
+            : lostNoticeMapper.selectBatchIds(noticeIds).stream().collect(Collectors.toMap(LostNotice::getId, LostNotice::getTitle));
+        Page<ReportVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        voPage.setRecords(result.getRecords().stream().map(r -> {
+            String title = r.getItemId() != null ? itemTitles.get(r.getItemId()) : noticeTitles.get(r.getNoticeId());
+            return toVO(r, null, title);
+        }).collect(Collectors.toList()));
+        return voPage;
+    }
     private ReportVO toVO(ReportLog r, String reporterName, String itemTitle) {
         return ReportVO.fromEntity(r, reporterName, itemTitle);
     }

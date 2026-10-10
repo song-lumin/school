@@ -58,13 +58,6 @@ public class LostNoticeController {
         return Result.success(lostNoticeService.close(id, userId));
     }
 
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('SYS_ADMIN')")
-    public Result<Void> deleteByAdmin(@PathVariable Long id) {
-        lostNoticeService.deleteByAdmin(id);
-        return Result.success("删除成功", null);
-    }
-
     @GetMapping("/{id}/matches")
     public Result<List<FoundItem>> smartMatch(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
@@ -84,6 +77,13 @@ public class LostNoticeController {
                                                                 Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         return Result.success(lostNoticeService.forward(id, request, userId));
+    }
+
+    /** 拾得者转发到本启事下的招领列表 */
+    @GetMapping("/{id}/forwarded-items")
+    public Result<List<FoundItem>> forwardedItems(@PathVariable Long id) {
+        List<FoundItem> items = lostNoticeService.getForwardedItems(id);
+        return Result.success(items);
     }
 
     @PostMapping(value = "/search-by-image", consumes = "multipart/form-data")

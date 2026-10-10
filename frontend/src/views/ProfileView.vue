@@ -3,10 +3,11 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <h3>个人信息</h3>
+          <h3>个人中心</h3>
           <el-radio-group v-model="activeTab">
             <el-radio-button value="info">我的资料</el-radio-button>
             <el-radio-button value="credits">积分台账</el-radio-button>
+            <el-radio-button v-if="isNormalUser" value="cert">诚信证书</el-radio-button>
           </el-radio-group>
         </div>
       </template>
@@ -54,13 +55,21 @@
         </div>
       </template>
 
-      <template v-else>
-        <el-alert
-          title="巡检核对 +1 分；成功归还被领取，发布人 +3 分、失主 +1 分"
-          type="info"
-          :closable="false"
-          style="margin-bottom: 16px"
-        />
+      <template v-else-if="activeTab === 'credits'">
+        <el-collapse class="credit-rules" v-model="rulesOpen">
+          <el-collapse-item title="积分规则说明（点此展开/收起）" name="rules">
+            <el-descriptions :column="2" border size="small" style="margin-bottom: 12px">
+              <el-descriptions-item label="发布招领奖励" span="2">+1 分。拾得者发布招领并把实物放入投放点后，由点位管理员巡检核对实物在站时发放；若失主在巡检前已先领取，管理员核对领取凭证后补发。</el-descriptions-item>
+              <el-descriptions-item label="成功归还奖励（拾取者）" span="2">+3 分。失主现场核对无误、签字合影确认领取后，自动发放给招领发布人。</el-descriptions-item>
+              <el-descriptions-item label="成功归还奖励（失主）" span="2">+1 分。失主现场确认领取后自动发放，鼓励及时认领。</el-descriptions-item>
+              <el-descriptions-item label="转发推荐奖励" span="2">+1 分。把公开招领转发到某条寻物启事，若该启事发布者最终通过此转发链路认领成功，转发者自动获得 1 分（回滚规则同上）。</el-descriptions-item>
+              <el-descriptions-item label="扣分/回滚" span="2">虚假招领、举报成立、申诉判定发错实物：已发积分将回滚；答错防伪问题累计 3 次锁定 24 小时（不直接扣分，但会降低认领置信度）。</el-descriptions-item>
+            </el-descriptions>
+            <p style="color:#89958f;font-size:12px;margin:0">
+              台账"类型"列对应：CHECK_ISSUE=巡检核对发的发布奖励；PICKUP_ISSUE=领取完成时的拾取者/失主奖励；FORWARD_REWARD=转发推荐奖励；带负数的为回滚/扣减。
+            </p>
+          </el-collapse-item>
+        </el-collapse>
         <el-table :data="creditLogs" v-loading="creditLoading" style="width: 100%">
           <el-table-column prop="createdAt" label="时间" width="170">
             <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
@@ -86,6 +95,19 @@
             @current-change="fetchCreditLogs"
           />
         </div>
+      </template>
+
+      <template v-if="activeTab === 'cert'">
+        <el-alert v-if="certNotice" type="info" :closable="false" style="margin-bottom:14px" :title="certNotice" />
+        <div v-else-if="cert" style="text-align:center;padding:20px">
+          <h2 style="color:#26745c">诚信积分证明</h2>
+          <p style="font-size:18px;font-weight:600;margin:10px 0">{{ cert.realName }}</p>
+          <p style="color:#666">学号：{{ cert.studentId }}</p>
+          <div style="font-size:48px;font-weight:700;color:#26745c;margin:16px 0">{{ cert.totalScore }}</div>
+          <p style="color:#999">诚信积分</p>
+          <el-button type="primary" style="margin-top:16px" @click="$router.push('/certificates')">查看完整证书与光荣榜</el-button>
+        </div>
+        <el-skeleton v-else :rows="5" />
       </template>
     </el-card>
 
@@ -135,7 +157,7 @@ const userStore = useUserStore()
 
 const isNormalUser = computed(() => userStore.userInfo?.role === 'USER')
 
-const activeTab = ref<'info' | 'credits'>('info')
+const activeTab = ref<'info' | 'credits' | 'cert'>('info')
 const loading = ref(false)
 const editDialogVisible = ref(false)
 const passwordDialogVisible = ref(false)
@@ -148,6 +170,11 @@ const creditLoading = ref(false)
 const creditPage = ref(1)
 const creditSize = ref(10)
 const creditTotal = ref(0)
+const cert = ref<any>(null)
+const certNotice = ref('')
+const certLoading = ref(false)
+const leaderboard = ref<any[]>([])
+const rulesOpen = ref(['rules'])
 
 const editForm = reactive({
   realName: userStore.userInfo?.realName || '',
@@ -241,9 +268,37 @@ const fetchCreditLogs = async () => {
   }
 }
 
+const fetchLeaderboard = async () => {
+  try {
+    const { creditApi } = await import('@/api')
+    const res = await creditApi.getLeaderboard(100)
+    leaderboard.value = res.data.entries || []
+  } catch (e) { console.error(e) }
+}
+const fetchCert = async () => {
+  certLoading.value = true
+  certNotice.value = ''
+  try {
+    const { creditApi } = await import('@/api')
+    const res = await creditApi.getCertificate()
+    cert.value = res.data
+  } catch (e: any) {
+    if (e?.response?.status === 403) {
+      certNotice.value = '管理员/点位管理员不参与诚信积分体系，无需诚信证明。'
+    } else {
+      console.error('加载证书失败', e)
+    }
+  } finally {
+    certLoading.value = false
+  }
+}
 watch(activeTab, (tab) => {
   if (tab === 'credits' && creditLogs.value.length === 0) {
     fetchCreditLogs()
+  }
+  if (tab === 'cert') {
+    if (!cert.value && !certNotice.value) fetchCert()
+    if (leaderboard.value.length === 0) fetchLeaderboard()
   }
 })
 

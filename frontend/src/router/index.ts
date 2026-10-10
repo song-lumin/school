@@ -53,10 +53,9 @@ const router = createRouter({
           meta: { requiresAuth: true }
         },
         {
-          path: '/disputes',
-          name: 'disputes',
-          component: () => import('@/views/DisputeView.vue'),
-          meta: { requiresAuth: true }
+          path: '/feedback',
+          name: 'feedback',
+          component: () => import('@/views/FeedbackView.vue'),
         },
         {
           path: '/admin',
@@ -71,6 +70,12 @@ const router = createRouter({
           meta: { requiresAuth: true, requiresPointAdmin: true }
         },
         {
+          path: '/archive',
+          name: 'archive',
+          component: () => import('@/views/ArchiveView.vue'),
+          meta: { requiresAuth: true, requiresPointAdmin: true }
+        },
+        {
           path: '/profile',
           name: 'profile',
           component: () => import('@/views/ProfileView.vue'),
@@ -80,7 +85,7 @@ const router = createRouter({
           path: '/certificates',
           name: 'certificates',
           component: () => import('@/views/CertificateView.vue'),
-          meta: { requiresAuth: true, forbidsAdmin: true }
+          meta: { requiresAuth: true }
         },
         {
           path: '/notices',

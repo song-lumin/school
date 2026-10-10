@@ -9,7 +9,8 @@
               <el-tag v-if="myRank" type="warning">光荣榜第 {{ myRank }} 名</el-tag>
             </div>
           </template>
-          <div class="certificate-preview" id="certificate-area">
+          <el-alert v-if="adminNotice" type="info" :closable="false" style="margin-bottom:14px" :title="adminNotice" />
+          <div class="certificate-preview" id="certificate-area" v-if="!adminNotice">
             <div class="cert-inner">
               <h2>诚信积分证明</h2>
               <p class="cert-name" v-if="cert">{{ cert.realName }}</p>
@@ -38,7 +39,7 @@
               <p class="cert-footer">校园失物招领及诚信积分系统 · {{ formatTime(cert?.issuedAt) }}</p>
             </div>
           </div>
-          <div class="cert-actions">
+          <div class="cert-actions" v-if="!adminNotice">
             <el-button type="primary" @click="handlePrint">
               <el-icon><Printer /></el-icon>
               打印 / 导出 PDF
@@ -134,12 +135,17 @@ const handlePrint = () => {
   }, 300)
 }
 
+const adminNotice = ref('')
 const fetchCertificate = async () => {
   try {
     const res = await creditApi.getCertificate()
     cert.value = res.data
-  } catch (error) {
-    console.error('加载诚信证明失败:', error)
+  } catch (error: any) {
+    if (error?.response?.status === 403) {
+      adminNotice.value = '管理员/点位管理员不参与诚信积分体系，无需诚信证明。'
+    } else {
+      console.error('加载诚信证明失败:', error)
+    }
   }
 }
 

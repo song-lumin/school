@@ -224,6 +224,17 @@ public class LostNoticeServiceImpl implements LostNoticeService {
         return results;
     }
 
+    @Override
+    public List<FoundItem> getForwardedItems(Long noticeId) {
+        return foundItemMapper.selectList(
+                new LambdaQueryWrapper<FoundItem>()
+                        .eq(FoundItem::getForwardedNoticeId, noticeId)
+                        .in(FoundItem::getItemStatus,
+                                ItemStatus.PUBLIC.getCode(),
+                                ItemStatus.CLAIMING.getCode())
+                        .orderByDesc(FoundItem::getPublishedAt));
+    }
+
     private MatchResultVO scoreMatch(LostNotice notice, FoundItem item) {
         int score = 0;
         List<String> reasons = new ArrayList<>();

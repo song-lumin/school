@@ -48,24 +48,29 @@ public class CreditQueryServiceImpl implements CreditQueryService {
 
     @Override
     public LeaderboardVO getLeaderboard(Long currentUserId, int top) {
-        // 光荣榜仅展示普通用户，管理员不参与积分体系
+        User me0 = userMapper.selectById(currentUserId);
+        boolean isAdmin = me0 != null && me0.getRole() != UserRole.USER;
+
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(User::getRole, UserRole.USER)
-                .eq(User::getAllowLeaderboard, 1)
-                .gt(User::getCreditScore, 0)
-                .orderByDesc(User::getCreditScore)
-                .last("LIMIT " + top);
+                .gt(User::getCreditScore, 0);
+        if (!isAdmin) {
+            wrapper.eq(User::getAllowLeaderboard, 1);
+        }
+        wrapper.orderByDesc(User::getCreditScore).last("LIMIT " + top);
 
         List<User> users = userMapper.selectList(wrapper);
 
+        boolean canSeeRealName = isAdmin;
+
         List<LeaderboardVO.Entry> entries = users.stream()
-                .map(u -> new LeaderboardVO.Entry(u.getId(), maskName(u.getRealName()), u.getCreditScore()))
+                .map(u -> new LeaderboardVO.Entry(u.getId(), u.getUsername(), canSeeRealName ? u.getRealName() : maskName(u.getRealName()), u.getCreditScore()))
                 .collect(Collectors.toList());
 
         Integer myRank = null;
         Integer myScore = 0;
 
-        User currentUser = userMapper.selectById(currentUserId);
+        User currentUser = me0;
         if (currentUser != null && currentUser.getRole() == UserRole.USER) {
             myScore = currentUser.getCreditScore();
             if (currentUser.getAllowLeaderboard() == 1) {

@@ -16,6 +16,10 @@ public interface FoundItemService {
 
     void invalidate(Long id, Long currentUserId);
 
+    void markPlaced(Long id, Long currentUserId);
+
+    void forwardToNotice(Long id, Long noticeId, Long currentUserId);
+
     void archive(Long id, Long currentUserId);
 
     IPage<FoundItemVO> listMy(Long currentUserId, ItemQueryRequest request);

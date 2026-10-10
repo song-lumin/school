@@ -235,6 +235,30 @@ public class AdminServiceImpl implements AdminService {
         return user;
     }
 
+    @Override
+    @Transactional
+    public void adjustCredit(Long userId, Integer newScore, String reason, Long operatorId) {
+        if (newScore == null || newScore < 0) {
+            throw new BusinessException(400, "积分必须为非负整数");
+        }
+        User user = getUserOrThrow(userId);
+        int oldScore = user.getCreditScore() != null ? user.getCreditScore() : 0;
+        int diff = newScore - oldScore;
+        if (diff == 0) return;
+        user.setCreditScore(newScore);
+        userMapper.updateById(user);
+        creditService.issueCredit(userId, diff, "ADMIN_ADJUST", null, null,
+                reason != null ? reason : "管理员调整积分", operatorId);
+    }
+
+    @Override
+    public java.util.List<com.school.lostfound.entity.CreditLog> userCreditLogs(Long userId) {
+        LambdaQueryWrapper<com.school.lostfound.entity.CreditLog> w = new LambdaQueryWrapper<>();
+        w.eq(com.school.lostfound.entity.CreditLog::getUserId, userId)
+         .orderByDesc(com.school.lostfound.entity.CreditLog::getCreatedAt);
+        return creditLogMapper.selectList(w);
+    }
+
     private UserVO convertToVO(User user) {
         UserVO vo = new UserVO();
         BeanUtils.copyProperties(user, vo);

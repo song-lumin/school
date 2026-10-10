@@ -83,4 +83,11 @@ public class ClaimController {
         return Result.success(claimService.pickup(id, body.get("pickupPhoto"),
                 body.get("pickupSignature"), userId));
     }
+
+    @PutMapping("/{id}/cancel-pickup")
+    public Result<Void> cancelPickup(@PathVariable Long id, Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        claimService.cancelPickup(id, userId);
+        return Result.success("已取消认领，其余申请已解锁", null);
+    }
 }

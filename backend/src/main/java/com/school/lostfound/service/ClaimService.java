@@ -21,6 +21,8 @@ public interface ClaimService {
 
     ClaimApplyVO pickup(Long id, String pickupPhoto, String pickupSignature, Long currentUserId);
 
+    void cancelPickup(Long id, Long currentUserId);
+
     IPage<ClaimApplyVO> listMy(Long currentUserId, int page, int size);
 
     IPage<ClaimApplyVO> listForReview(Long currentUserId, Integer status, int page, int size);

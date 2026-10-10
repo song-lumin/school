@@ -20,6 +20,7 @@ import com.school.lostfound.service.CreditService;
 import com.school.lostfound.service.DropPointService;
 import com.school.lostfound.vo.ClaimApplyVO;
 import com.school.lostfound.vo.DropPointVO;
+import com.school.lostfound.vo.InventoryItemVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -123,10 +124,17 @@ public class DropPointServiceImpl implements DropPointService {
     public List<FoundItem> getPendingItems(Long dropPointId) {
         getDropPointOrThrow(dropPointId);
 
+        // 巡检清单包含两类：
+        // 1. 公开待认领(1)但hand_in_status≠2：正常待巡检
+        // 2. 已取件(3)但hand_in_status=1：失主已在巡检前领取，需核对凭证后补发1分
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FoundItem::getDropPointId, dropPointId)
-                .eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode())
-                .apply("id NOT IN (SELECT item_id FROM hand_in_log WHERE drop_point_id = {0} AND hand_in_status = 2)", dropPointId)
+                .and(w -> w
+                        .nested(n -> n.eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode())
+                                .apply("id NOT IN (SELECT item_id FROM hand_in_log WHERE drop_point_id = {0} AND hand_in_status = 2)", dropPointId))
+                        .or(n -> n.eq(FoundItem::getItemStatus, ItemStatus.PICKED_UP.getCode())
+                                .apply("id IN (SELECT item_id FROM hand_in_log WHERE drop_point_id = {0} AND hand_in_status = 1)", dropPointId))
+                )
                 .orderByDesc(FoundItem::getPublishedAt);
         return foundItemMapper.selectList(wrapper);
     }
@@ -202,6 +210,66 @@ public class DropPointServiceImpl implements DropPointService {
         Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
         creditService.issueCredit(publisherId, CHECK_ISSUE_CREDIT, "CHECK_ISSUE",
                 item.getId(), null, "物品巡检通过", operatorId);
+    }
+    @Override
+    public List<InventoryItemVO> getInventory(Long dropPointId) {
+        getDropPointOrThrow(dropPointId);
+
+        LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(FoundItem::getDropPointId, dropPointId)
+                .orderByDesc(FoundItem::getPublishedAt);
+        List<FoundItem> items = foundItemMapper.selectList(wrapper);
+        if (items.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> itemIds = items.stream().map(FoundItem::getId).toList();
+
+        LambdaQueryWrapper<HandInLog> logWrapper = new LambdaQueryWrapper<>();
+        logWrapper.in(HandInLog::getItemId, itemIds);
+        Map<Long, HandInLog> logMap = handInLogMapper.selectList(logWrapper).stream()
+                .collect(Collectors.toMap(HandInLog::getItemId, l -> l, (a, b) -> a));
+
+        List<Long> founderIds = items.stream()
+                .map(i -> i.getActualFounderId() != null ? i.getActualFounderId() : i.getFounderId())
+                .filter(Objects::nonNull).distinct().toList();
+        Map<Long, String> founderNames = founderIds.isEmpty() ? Map.of()
+                : userMapper.selectBatchIds(founderIds).stream()
+                        .collect(Collectors.toMap(User::getId, User::getRealName));
+
+        LambdaQueryWrapper<ClaimApply> claimWrapper = new LambdaQueryWrapper<>();
+        claimWrapper.in(ClaimApply::getItemId, itemIds)
+                .eq(ClaimApply::getApplyStatus, 1);
+        Map<Long, ClaimApply> successClaimMap = claimApplyMapper.selectList(claimWrapper).stream()
+                .collect(Collectors.toMap(ClaimApply::getItemId, c -> c, (a, b) -> a));
+        Map<Long, String> claimerMap = new java.util.HashMap<>();
+        successClaimMap.forEach((itemId, c) -> {
+            if (c.getClaimerId() != null) {
+                User u = userMapper.selectById(c.getClaimerId());
+                claimerMap.put(itemId, u != null ? u.getRealName() : null);
+            }
+        });
+
+        return items.stream().map(i -> {
+            InventoryItemVO vo = new InventoryItemVO();
+            vo.setItem(i);
+            HandInLog log = logMap.get(i.getId());
+            if (log != null) {
+                vo.setHandInStatus(log.getHandInStatus());
+                vo.setHandInAt(log.getHandedInAt());
+                vo.setCheckedAt(log.getCheckedAt());
+                vo.setCheckNote(log.getCheckNote());
+                vo.setCreditIssued(log.getCreditIssued());
+            } else {
+                vo.setHandInStatus(0);
+            }
+            Long fid = i.getActualFounderId() != null ? i.getActualFounderId() : i.getFounderId();
+            vo.setFounderName(founderNames.get(fid));
+            vo.setClaimerName(claimerMap.get(i.getId()));
+            ClaimApply sc = successClaimMap.get(i.getId());
+            if (sc != null) vo.setPickupTime(sc.getPickupTime());
+            return vo;
+        }).collect(Collectors.toList());
     }
 
     private void validateAdmin(Long adminId) {

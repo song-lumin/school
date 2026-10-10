@@ -54,7 +54,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/drop-points", "/api/drop-points/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories", "/api/config").permitAll()
                         .requestMatchers("/uploads/**").permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/admin/**").hasAnyRole("SYS_ADMIN","POINT_ADMIN")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

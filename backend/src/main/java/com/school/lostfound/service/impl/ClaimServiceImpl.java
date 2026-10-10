@@ -94,9 +94,10 @@ public class ClaimServiceImpl implements ClaimService {
 
         if (existing != null) {
             if (existing.getApplyStatus().equals(ClaimStatus.LOCKED.getCode())) {
-                // 第3次驳回时updatedAt即锁定时间，满24h自动解锁放行
+                // 锁定24h到期后解锁，wrong_try_count清零，方可再次提交回答
                 if (existing.getUpdatedAt().plusHours(LOCK_HOURS).isBefore(LocalDateTime.now())) {
                     existing.setApplyStatus(ClaimStatus.REJECTED.getCode());
+                    existing.setRejectCount(0);
                     claimApplyMapper.updateById(existing);
                 } else {
                     throw new BusinessException(409, "认领被驳回3次，已锁定，请24小时后再试");
@@ -109,8 +110,20 @@ public class ClaimServiceImpl implements ClaimService {
         }
 
         ClaimApply apply = existing != null ? existing : new ClaimApply();
+
+        // 查询用户信用分和历史成功认领次数，用于置信度综合计算
+        User claimer = userMapper.selectById(currentUserId);
+        int creditScore = claimer != null && claimer.getCreditScore() != null ? claimer.getCreditScore() : 0;
+        LambdaQueryWrapper<ClaimApply> successWrapper = new LambdaQueryWrapper<>();
+        successWrapper.eq(ClaimApply::getClaimerId, currentUserId)
+                .eq(ClaimApply::getApplyStatus, ClaimStatus.COMPLETED.getCode());
+        long successCount = claimApplyMapper.selectCount(successWrapper);
+        int existingRejectCount = existing != null && existing.getRejectCount() != null ? existing.getRejectCount() : 0;
+
         ClaimConfidenceAnalyzer.Analysis confidence = ClaimConfidenceAnalyzer.analyze(
-                request.getAnswer(), item.getTitle() + " " + item.getDescription());
+                request.getAnswer(), item.getTitle() + " " + item.getDescription(),
+                item.getReferenceAnswer(),
+                creditScore, (int) successCount, existingRejectCount);
         apply.setItemId(request.getItemId());
         apply.setSourceNoticeId(sourceNoticeId);
         apply.setClaimerId(currentUserId);
@@ -126,11 +139,9 @@ public class ClaimServiceImpl implements ClaimService {
             apply.setRejectCount(0);
             claimApplyMapper.insert(apply);
         } else {
-            // 重新申请保留累计拒绝次数（累计3次锁定），不能清零
             claimApplyMapper.updateById(apply);
         }
 
-        User claimer = userMapper.selectById(currentUserId);
         return ClaimApplyVO.fromEntity(apply, item.getTitle(), item.getClaimQuestion(),
                 claimer != null ? claimer.getRealName() : null);
     }
@@ -147,6 +158,7 @@ public class ClaimServiceImpl implements ClaimService {
 
         LambdaQueryWrapper<ClaimApply> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ClaimApply::getItemId, itemId)
+                .orderByDesc(ClaimApply::getConfidenceScore)
                 .orderByDesc(ClaimApply::getCreatedAt);
 
         return convertPage(claimApplyMapper.selectPage(new Page<>(page, size), wrapper), item);
@@ -188,13 +200,13 @@ public class ClaimServiceImpl implements ClaimService {
         apply.setApplyStatus(ClaimStatus.APPROVED_WAITING_PICKUP.getCode());
         claimApplyMapper.updateById(apply);
 
-        // 同意一人后，同物品其余待审核申请全部驳回，不再挂着
+        // 同意一人后，同物品其余待审核申请全部锁定(3)，不再允许新申请，但保留记录待解锁
         LambdaQueryWrapper<ClaimApply> othersWrapper = new LambdaQueryWrapper<>();
         othersWrapper.eq(ClaimApply::getItemId, item.getId())
                 .eq(ClaimApply::getApplyStatus, ClaimStatus.PENDING.getCode())
                 .ne(ClaimApply::getId, apply.getId());
         ClaimApply othersUpdate = new ClaimApply();
-        othersUpdate.setApplyStatus(ClaimStatus.REJECTED.getCode());
+        othersUpdate.setApplyStatus(ClaimStatus.LOCKED.getCode());
         claimApplyMapper.update(othersUpdate, othersWrapper);
 
         item.setItemStatus(ItemStatus.CLAIMING.getCode());
@@ -248,8 +260,9 @@ public class ClaimServiceImpl implements ClaimService {
         if (item == null) {
             throw new BusinessException(404, "物品不存在");
         }
-        if (!canReviewClaim(item, currentUserId)) {
-            throw new BusinessException(403, "只有发布者或管理员可以确认取件");
+        // 领取确认由失主本人操作（现场找到实物后签字合影）
+        if (!apply.getClaimerId().equals(currentUserId)) {
+            throw new BusinessException(403, "只有认领人本人可以确认取件");
         }
         if (!apply.getApplyStatus().equals(ClaimStatus.APPROVED_WAITING_PICKUP.getCode())) {
             throw new BusinessException(409, "申请当前状态不可取件");
@@ -269,13 +282,73 @@ public class ClaimServiceImpl implements ClaimService {
         item.setClaimedAt(LocalDateTime.now());
         foundItemMapper.updateById(item);
 
+        // 此前被锁定的其余认领回复统一标记为2认领驳回
+        LambdaQueryWrapper<ClaimApply> lockedWrapper = new LambdaQueryWrapper<>();
+        lockedWrapper.eq(ClaimApply::getItemId, item.getId())
+                .eq(ClaimApply::getApplyStatus, ClaimStatus.LOCKED.getCode());
+        ClaimApply lockedUpdate = new ClaimApply();
+        lockedUpdate.setApplyStatus(ClaimStatus.REJECTED.getCode());
+        claimApplyMapper.update(lockedUpdate, lockedWrapper);
+
         Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
         creditService.issueCredit(publisherId, PICKUP_ISSUE_CREDIT, "PICKUP_ISSUE",
-                item.getId(), apply.getId(), "失主取件完成（拾取者）", currentUserId);
+                item.getId(), apply.getId(), "失主取件完成（拾获者）", currentUserId);
         creditService.issueCredit(apply.getClaimerId(), CLAIMANT_CREDIT, "PICKUP_ISSUE",
                 item.getId(), apply.getId(), "失主取件完成（认领者）", currentUserId);
 
+        // 转发人额外奖励1分：转发到寻物启事且最终认领成功
+        Long forwarderId = item.getForwarderId();
+        if (forwarderId != null
+                && !forwarderId.equals(publisherId)
+                && !forwarderId.equals(apply.getClaimerId())) {
+            creditService.issueCredit(forwarderId, 1, "FORWARD_REWARD",
+                    item.getId(), apply.getId(), "招领转发至寻物启事，最终认领成功", currentUserId);
+        }
+
         return convertSingle(apply, item);
+    }
+
+    @Override
+    @Transactional
+    public void cancelPickup(Long id, Long currentUserId) {
+        ClaimApply apply = getApplyOrThrow(id);
+        FoundItem item = foundItemMapper.selectById(apply.getItemId());
+
+        if (item == null) {
+            throw new BusinessException(404, "物品不存在");
+        }
+        // 现场取消认领由失主本人操作
+        if (!apply.getClaimerId().equals(currentUserId)) {
+            throw new BusinessException(403, "只有认领人本人可以取消认领");
+        }
+        if (!apply.getApplyStatus().equals(ClaimStatus.APPROVED_WAITING_PICKUP.getCode())) {
+            throw new BusinessException(409, "只有已同意待取件的申请可以取消");
+        }
+
+        // 该条回复变2驳回，wrong_try_count清零（现场核对失败不视为恶意答错）
+        apply.setApplyStatus(ClaimStatus.REJECTED.getCode());
+        apply.setRejectCount(0);
+        claimApplyMapper.updateById(apply);
+
+        // 其余被锁定的回复(3)解锁恢复为待审核(0)
+        LambdaQueryWrapper<ClaimApply> lockedWrapper = new LambdaQueryWrapper<>();
+        lockedWrapper.eq(ClaimApply::getItemId, item.getId())
+                .eq(ClaimApply::getApplyStatus, ClaimStatus.LOCKED.getCode());
+        ClaimApply lockedUpdate = new ClaimApply();
+        lockedUpdate.setApplyStatus(ClaimStatus.PENDING.getCode());
+        claimApplyMapper.update(lockedUpdate, lockedWrapper);
+
+        // 检查是否还有其他待审核回复，决定物品状态
+        LambdaQueryWrapper<ClaimApply> pendingWrapper = new LambdaQueryWrapper<>();
+        pendingWrapper.eq(ClaimApply::getItemId, item.getId())
+                .eq(ClaimApply::getApplyStatus, ClaimStatus.PENDING.getCode());
+        long pendingCount = claimApplyMapper.selectCount(pendingWrapper);
+        if (pendingCount == 0) {
+            // 无其他回复，物品退回公开待认领
+            item.setItemStatus(ItemStatus.PUBLIC.getCode());
+        }
+        // 还有其他待审核回复则保持认领中(2)
+        foundItemMapper.updateById(item);
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.school.lostfound.dto.DropPointRequest;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.vo.ClaimApplyVO;
 import com.school.lostfound.vo.DropPointVO;
+import com.school.lostfound.vo.InventoryItemVO;
 
 import java.util.List;
 
@@ -24,4 +25,6 @@ public interface DropPointService {
     List<ClaimApplyVO> getPendingPickups(Long dropPointId);
 
     void checkItem(Long dropPointId, CheckRequest request, Long operatorId);
+
+    List<InventoryItemVO> getInventory(Long dropPointId);
 }

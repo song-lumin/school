@@ -17,11 +17,15 @@
           <el-menu-item index="/items">失物招领</el-menu-item>
           <el-menu-item index="/notices">寻物启事</el-menu-item>
           <el-menu-item index="/claims" v-if="userStore.isLoggedIn">认领管理</el-menu-item>
-          <el-menu-item index="/disputes" v-if="userStore.isLoggedIn">申诉中心</el-menu-item>
-          <el-menu-item index="/certificates" v-if="userStore.isLoggedIn && !userStore.isAdmin && !userStore.isPointAdmin">诚信证书</el-menu-item>
-          <el-menu-item index="/profile" v-if="userStore.isLoggedIn">个人中心</el-menu-item>
-          <el-menu-item index="/admin" v-if="userStore.isAdmin">管理后台</el-menu-item>
-          <el-menu-item index="/point-admin" v-if="userStore.isPointAdmin || userStore.isAdmin">点位工作台</el-menu-item>
+          <el-menu-item index="/feedback" v-if="userStore.isLoggedIn">反馈中心</el-menu-item>
+
+
+          <el-menu-item index="/point-admin" v-if="userStore.isPointAdmin || userStore.isAdmin">
+            点位工作台<span class="admin-badge" v-if="userStore.isAdmin">管</span>
+          </el-menu-item>
+          <el-menu-item index="/admin" v-if="userStore.isAdmin">
+            管理工作台<span class="admin-badge">系统</span>
+          </el-menu-item>
         </el-menu>
         <div class="header-right">
           <template v-if="userStore.isLoggedIn">
@@ -33,7 +37,8 @@
               </span>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="profile">个人信息</el-dropdown-item>
+                  <el-dropdown-item command="profile">个人中心</el-dropdown-item>
+                  <el-dropdown-item v-if="userStore.isAdmin || userStore.isPointAdmin" command="archive">留档区</el-dropdown-item>
                   <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -76,15 +81,21 @@ const handleCommand = async (command: string) => {
         cancelButtonText: '取消',
         type: 'warning'
       })
-      await authApi.logout()
-      userStore.clearAuth()
-      ElMessage.success('已退出登录')
-      router.push('/login')
-    } catch (error) {
-      console.error('退出登录失败:', error)
+    } catch {
+      return
     }
+    try {
+      await authApi.logout()
+    } catch (e) {
+      console.warn('后端 logout 失败，继续本地退出:', e)
+    }
+    userStore.clearAuth()
+    ElMessage.success('已退出登录')
+    router.push('/login')
   } else if (command === 'profile') {
     router.push('/profile')
+  } else if (command === 'archive') {
+    router.push('/archive')
   }
 }
 </script>
@@ -150,6 +161,18 @@ const handleCommand = async (command: string) => {
   padding: 0 13px;
   color: #5b6961;
   font-size: 13px;
+}
+
+.admin-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  color: #fff;
+  background: #c0392b;
+  border-radius: 3px;
+  vertical-align: middle;
 }
 
 .header-menu :deep(.el-menu-item.is-active) {

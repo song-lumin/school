@@ -27,6 +27,14 @@ public class ReportController {
         return Result.success(reportService.create(request, userId));
     }
 
+
+    @GetMapping("/reports/my")
+    public Result<IPage<ReportVO>> listMy(@RequestParam(defaultValue = "1") int page,
+                                          @RequestParam(defaultValue = "10") int size,
+                                          Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        return Result.success(reportService.listMy(userId, page, size));
+    }
     @GetMapping("/admin/reports")
     @PreAuthorize("hasRole('SYS_ADMIN')")
     public Result<IPage<ReportVO>> list(@RequestParam(required = false) Integer status,

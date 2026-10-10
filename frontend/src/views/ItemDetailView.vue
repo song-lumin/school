@@ -37,6 +37,7 @@
           <div class="detail-status-row">
             <span class="status-chip" :data-status="item.itemStatus">{{ ITEM_STATUS_MAP[item.itemStatus]?.text || '未知' }}</span>
             <span v-if="item.perishable === 1" class="perish-chip">易腐品</span>
+            <span class="post-code-chip">招领编号 #{{ item.id }}</span>
             <span v-if="item.newUser" class="newbie-chip">新手发布</span>
           </div>
           <h1 class="detail-title">{{ item.title }}</h1>
@@ -67,6 +68,15 @@
               <el-button type="primary" size="large" @click="claimDialogVisible = true">这是我的，申请认领</el-button>
             </template>
             <el-button
+              v-if="item.itemStatus === 1"
+              type="warning"
+              plain
+              :loading="acting"
+              @click="openForwardDialog"
+            >
+              转发到寻物启事
+            </el-button>
+            <el-button
               v-if="(isMyItem && item.itemStatus === 3) || (userStore.isAdmin && item.itemStatus === 5)"
               type="info"
               plain
@@ -76,8 +86,30 @@
               {{ item.itemStatus === 5 ? '处置归档' : '归档' }}
             </el-button>
           </div>
+
           <el-alert
-            v-else-if="item.itemStatus === 1"
+            v-if="item.takedownReason"
+            :title="'该帖已被下架：' + item.takedownReason"
+            type="error"
+            :closable="false"
+            style="margin-top: 16px"
+          />
+          <el-alert
+            v-if="item.appealStatus === 1"
+            title="申诉审核中，请等待管理员处理"
+            type="warning"
+            :closable="false"
+            style="margin-top: 12px"
+          />
+
+          <div class="action-bar" style="margin-top: 12px">
+            <el-button v-if="!isMyItem && item.itemStatus === 1" size="small" plain @click="reportDialogVisible = true">举报此帖</el-button>
+            <el-button v-if="isMyItem && item.takedownReason && item.appealStatus !== 1 && item.appealStatus !== 2" size="small" type="warning" plain @click="appealDialogVisible = true">申诉恢复</el-button>
+            <el-button v-if="userStore.isAdmin && item.itemStatus === 1" size="small" type="danger" plain @click="adminTakedownDialogVisible = true">管理员下架</el-button>
+          </div>
+
+          <el-alert
+            v-if="item.itemStatus === 1 && !userStore.isLoggedIn"
             title="登录后可申请认领"
             type="info"
             :closable="false"
@@ -156,6 +188,59 @@
         <el-button type="danger" :loading="acting" @click="handleReject">确认驳回</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="forwardDialogVisible" title="转发到寻物启事" width="600px">
+      <el-alert type="info" :closable="false" style="margin-bottom: 14px">
+        输入寻物启事编号定位后核对，确认无误再转发。
+      </el-alert>
+
+      <div class="forward-code-bar">
+        <el-input v-model="forwardCodeInput" placeholder="输入寻物启事编号（如 7）" style="width: 220px" clearable @keyup.enter="lookupForwardCode" />
+        <el-button @click="lookupForwardCode">按编号查找</el-button>
+      </div>
+
+      <el-card v-if="forwardPreview" class="forward-preview" shadow="never">
+        <template #header><span style="font-weight:600">核对这条启事：</span></template>
+        <div><b>{{ forwardPreview.title }}</b> <el-tag size="small" style="margin-left:6px">编号 #{{ forwardPreview.id }}</el-tag></div>
+        <div style="color:#666;font-size:13px;margin-top:6px">丢失地点：{{ forwardPreview.lostLocation }}　|　丢失时间：{{ forwardPreview.lostTime || '-' }}</div>
+        <div style="margin-top:10px;text-align:right">
+          <el-button size="small" @click="forwardPreview = null">取消</el-button>
+          <el-button size="small" type="primary" :loading="acting" @click="doForward(forwardPreview.id)">确认转发到此启事</el-button>
+        </div>
+      </el-card>
+
+    </el-dialog>
+
+    <el-dialog v-model="reportDialogVisible" title="举报此招领" width="480px">
+      <el-select v-model="reportType" placeholder="选择举报类型" style="width: 100%; margin-bottom: 12px">
+        <el-option label="虚假投放" value="FAKE_PUBLISH" />
+        <el-option label="描述不符" value="DESC_MISMATCH" />
+        <el-option label="其他" value="OTHER" />
+      </el-select>
+      <el-input v-model="reportDesc" type="textarea" :rows="3" placeholder="请描述问题" maxlength="500" show-word-limit />
+      <template #footer>
+        <el-button @click="reportDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="acting" @click="submitReport">提交举报</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="appealDialogVisible" title="申诉恢复" width="480px">
+      <el-alert title="请说明为什么这篇招领应该被恢复" type="info" :closable="false" style="margin-bottom: 12px" />
+      <el-input v-model="appealReasonText" type="textarea" :rows="3" placeholder="申诉理由" maxlength="500" show-word-limit />
+      <template #footer>
+        <el-button @click="appealDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="acting" @click="submitAppeal">提交申诉</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="adminTakedownDialogVisible" title="管理员下架" width="480px">
+      <el-alert title="下架必须填写原因，发布者可看到原因并申诉" type="warning" :closable="false" style="margin-bottom: 12px" />
+      <el-input v-model="adminTakedownReason" type="textarea" :rows="3" placeholder="下架原因" maxlength="500" show-word-limit />
+      <template #footer>
+        <el-button @click="adminTakedownDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="acting" @click="submitAdminTakedown">确认下架</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -163,10 +248,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { foundItemApi, claimApi } from '@/api'
+import { foundItemApi, claimApi, lostNoticeApi, reportApi, moderationApi } from '@/api'
 import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS_MAP, CLAIM_STATUS_MAP } from '@/types'
-import type { FoundItem, ClaimApply } from '@/types'
+import type { FoundItem, ClaimApply, LostNotice } from '@/types'
 import { categoryTone } from '@/utils/placeholder'
 
 const route = useRoute()
@@ -176,6 +261,7 @@ const loading = ref(false)
 const acting = ref(false)
 const item = ref<FoundItem | null>(null)
 const claims = ref<ClaimApply[]>([])
+const claimsForbidden = ref(false)
 
 const claimDialogVisible = ref(false)
 const claimAnswer = ref('')
@@ -185,12 +271,26 @@ const rejectDialogVisible = ref(false)
 const rejectReason = ref('')
 const rejectingClaim = ref<ClaimApply | null>(null)
 
+const forwardDialogVisible = ref(false)
+const noticesLoading = ref(false)
+const openNotices = ref<LostNotice[]>([])
+const forwardCodeInput = ref('')
+const forwardPreview = ref<any>(null)
+
+const reportDialogVisible = ref(false)
+const reportType = ref('OTHER')
+const reportDesc = ref('')
+const appealDialogVisible = ref(false)
+const appealReasonText = ref('')
+const adminTakedownDialogVisible = ref(false)
+const adminTakedownReason = ref('')
+
 const itemId = computed(() => route.params.id as string)
 const isMyItem = computed(() => {
   return !!item.value && userStore.userInfo?.id === item.value.founderId
 })
 const isReviewer = computed(() => isMyItem.value || userStore.isAdmin || userStore.isPointAdmin)
-const canSeeClaims = computed(() => !!item.value && isReviewer.value && item.value.itemStatus !== 0)
+const canSeeClaims = computed(() => !!item.value && isReviewer.value && item.value.itemStatus !== 0 && !claimsForbidden.value)
 
 const isPlaceholderImage = (src: string) => src.includes('example.com')
 const realImages = (item: FoundItem) => (item.images || []).filter(src => !isPlaceholderImage(src))
@@ -328,6 +428,82 @@ const handleReject = async () => {
   }
 }
 
+const openForwardDialog = async () => {
+  forwardDialogVisible.value = true
+  forwardPreview.value = null
+  forwardCodeInput.value = ''
+  noticesLoading.value = true
+  try {
+    const res = await lostNoticeApi.list({ status: 0, page: 1, size: 50 })
+    openNotices.value = res.data.records
+  } catch {
+    openNotices.value = []
+  } finally {
+    noticesLoading.value = false
+  }
+}
+
+const lookupForwardCode = () => {
+  const code = parseInt(forwardCodeInput.value, 10)
+  if (!code || isNaN(code)) {
+    ElMessage.warning('请输入正确的启事编号')
+    return
+  }
+  const found = openNotices.value.find(n => n.id === code)
+  if (found) {
+    forwardPreview.value = found
+  } else {
+    ElMessage.error('未找到编号 ' + code + ' 的进行中寻物启事，请核对编号')
+    forwardPreview.value = null
+  }
+}
+
+const doForward = async (noticeId: number) => {
+  acting.value = true
+  try {
+    await foundItemApi.forwardToNotice(itemId.value, noticeId)
+    ElMessage.success('已转发到寻物启事，启事发布者将看到这条招领')
+    forwardDialogVisible.value = false
+  } catch (error) {
+    console.error('转发失败:', error)
+  } finally {
+    acting.value = false
+  }
+}
+
+const submitReport = async () => {
+  if (!reportDesc.value.trim()) { ElMessage.warning('请填写举报描述'); return }
+  acting.value = true
+  try {
+    await reportApi.create({ reportType: reportType.value, itemId: Number(itemId.value), description: reportDesc.value.trim() })
+    ElMessage.success('举报已提交，等待管理员审核')
+    reportDialogVisible.value = false
+    reportDesc.value = ''
+  } catch (e) { console.error(e) } finally { acting.value = false }
+}
+
+const submitAppeal = async () => {
+  if (!appealReasonText.value.trim()) { ElMessage.warning('请填写申诉理由'); return }
+  acting.value = true
+  try {
+    await moderationApi.appealItem(itemId.value, appealReasonText.value.trim())
+    ElMessage.success('申诉已提交')
+    appealDialogVisible.value = false
+    await fetchDetail()
+  } catch (e) { console.error(e) } finally { acting.value = false }
+}
+
+const submitAdminTakedown = async () => {
+  if (!adminTakedownReason.value.trim()) { ElMessage.warning('请填写下架原因'); return }
+  acting.value = true
+  try {
+    await moderationApi.takedownItem(itemId.value, adminTakedownReason.value.trim())
+    ElMessage.success('已下架')
+    adminTakedownDialogVisible.value = false
+    await fetchDetail()
+  } catch (e) { console.error(e) } finally { acting.value = false }
+}
+
 onMounted(() => {
   fetchDetail()
 })
@@ -372,6 +548,7 @@ onMounted(() => {
 .status-chip[data-status='3'] { background: #5a738a; }
 .status-chip[data-status='0'], .status-chip[data-status='4'], .status-chip[data-status='5'] { background: #78847c; }
 .perish-chip { padding: 5px 11px; background: #f6e3d8; color: #a04b32; font-size: 12px; font-weight: 550; }
+.post-code-chip { display:inline-block; padding:2px 8px; background:#eef4ff0; color:#26745c; border:1px solid #cfe3d8; border-radius:4px; font-size:12px; font-weight:600; }
 .newbie-chip { padding: 5px 11px; background: #f3e9cf; color: #8d6d1f; font-size: 12px; font-weight: 550; }
 
 .detail-title { margin: 16px 0 0; color: #26332f; font-size: clamp(22px, 2.2vw, 30px); font-weight: 650; line-height: 1.4; }

@@ -53,6 +53,22 @@ public class AdminController {
         return Result.success(adminService.getExpireWarnings());
     }
 
+    @PutMapping("/users/{id}/credit")
+    public Result<Void> adjustCredit(@PathVariable Long id,
+                                     @RequestBody Map<String, Object> body,
+                                     Authentication authentication) {
+        Long operatorId = (Long) authentication.getPrincipal();
+        Integer newScore = body.get("newScore") == null ? null : Integer.valueOf(body.get("newScore").toString());
+        String reason = body.get("reason") == null ? null : body.get("reason").toString();
+        adminService.adjustCredit(id, newScore, reason, operatorId);
+        return Result.success("积分调整成功", null);
+    }
+
+    @GetMapping("/users/{id}/credit-logs")
+    public Result<java.util.List<com.school.lostfound.entity.CreditLog>> userCreditLogs(@PathVariable Long id) {
+        return Result.success(adminService.userCreditLogs(id));
+    }
+
     @PostMapping("/credits/rollback")
     public Result<Void> rollbackCredit(@RequestBody Map<String, Object> request,
                                        Authentication authentication) {
