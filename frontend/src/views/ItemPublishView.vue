@@ -37,16 +37,48 @@
           <el-form-item label="拾取地点" prop="foundLocation" class="row-item">
             <el-input v-model="form.foundLocation" placeholder="你在哪里捡到的，例如：图书馆三楼自习区" maxlength="100" />
           </el-form-item>
-          <el-form-item label="拾取时间" prop="foundTime" class="row-item">
+          <el-form-item label="拾取日期" prop="foundTimeDate" class="row-item">
             <el-date-picker
-              v-model="form.foundTime"
-              type="datetime"
-              placeholder="选择拾取时间"
+              v-model="form.foundTimeDate"
+              type="date"
+              placeholder="哪天捡到的"
               style="width: 100%"
-              value-format="YYYY-MM-DDTHH:mm:ss"
+              value-format="YYYY-MM-DD"
+              :disabled-date="disableFutureDate"
             />
           </el-form-item>
         </div>
+        <div class="form-row">
+          <el-form-item label="时间精度" prop="foundTimePrecision" class="row-item">
+            <el-select v-model="form.foundTimePrecision" style="width: 100%" @change="handlePrecisionChange">
+              <el-option
+                v-for="opt in FOUND_TIME_PRECISION_OPTIONS"
+                :key="opt.value"
+                :label="opt.label"
+                :value="opt.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="form.foundTimePrecision === 0" label="具体时间" prop="foundTimeClock" class="row-item">
+            <el-time-picker
+              v-model="form.foundTimeClock"
+              placeholder="选择时间"
+              style="width: 100%"
+              value-format="HH:mm:ss"
+            />
+          </el-form-item>
+        </div>
+        <el-form-item label="时间描述（选填）">
+          <el-input
+            v-model="form.foundTimeText"
+            maxlength="60"
+            show-word-limit
+            placeholder="记不清具体时间就写个大概，例如：周三傍晚左右、午休时间"
+          />
+          <div class="field-tip standalone">
+            拾取时间允许模糊：只选「哪天」或「上午／下午／傍晚／晚上」即可，不必精确到分秒。失主核对时看的是物品特征，不是精确时分。
+          </div>
+        </el-form-item>
         <el-form-item label="投放点" prop="dropPointId">
           <el-select v-model="form.dropPointId" placeholder="你把物品放到哪个站点" style="width: 100%">
             <el-option
@@ -135,6 +167,7 @@ import type { FormInstance, FormRules, UploadFile, UploadUserFile } from 'elemen
 import { foundItemApi, uploadApi, dropPointApi } from '@/api'
 import { ITEM_CATEGORIES } from '@/types'
 import type { DropPoint } from '@/types'
+import { FOUND_TIME_PRECISION_OPTIONS, PRECISION_PLACEHOLDER_HOUR } from '@/utils/foundTime'
 
 const router = useRouter()
 const formRef = ref<FormInstance>()
@@ -157,7 +190,10 @@ const form = reactive({
   description: '',
   foundLocation: '',
   dropPointId: undefined as number | undefined,
-  foundTime: '',
+  foundTimeDate: '',
+  foundTimePrecision: 1,
+  foundTimeClock: '',
+  foundTimeText: '',
   images: [] as UploadUserFile[],
   perishable: 0,
   claimQuestion: '',
@@ -165,12 +201,36 @@ const form = reactive({
   actualFounderId: undefined as number | undefined
 })
 
+/** 不允许选未来日期：还没捡到的东西不能发布 */
+const disableFutureDate = (date: Date) => {
+  const today = new Date()
+  today.setHours(23, 59, 59, 999)
+  return date.getTime() > today.getTime()
+}
+
+/** 从「精确到分钟」切回模糊档时清掉具体时间，避免带着旧值提交 */
+const handlePrecisionChange = () => {
+  if (form.foundTimePrecision !== 1 && form.foundTimePrecision !== 0) {
+    form.foundTimeClock = ''
+  }
+  formRef.value?.validateField('foundTimeClock')
+}
+
 const rules: FormRules = {
   title: [{ required: true, message: '请输入物品标题', trigger: 'blur' }],
   category: [{ required: true, message: '请选择物品分类', trigger: 'change' }],
   foundLocation: [{ required: true, message: '请输入拾取地点', trigger: 'blur' }],
   dropPointId: [{ required: true, message: '请选择投放点', trigger: 'change' }],
-  foundTime: [{ required: true, message: '请选择拾取时间', trigger: 'change' }],
+  foundTimeDate: [{ required: true, message: '请选择拾取日期', trigger: 'change' }],
+  foundTimeClock: [
+    {
+      validator: (_rule: unknown, _value: unknown, callback: (error?: Error) => void) => {
+        if (form.foundTimePrecision === 0 && !form.foundTimeClock) callback(new Error('请选择具体时间'))
+        else callback()
+      },
+      trigger: 'change'
+    }
+  ],
   images: [
     {
       required: true,
@@ -217,6 +277,15 @@ const uploadImages = async (): Promise<string[]> => {
   return urls
 }
 
+/** 组装后端 found_time：模糊档位只填占位时刻，真实精度靠 foundTimePrecision 表达 */
+const buildFoundTime = (): string => {
+  if (form.foundTimePrecision === 0) {
+    return `${form.foundTimeDate}T${form.foundTimeClock || '00:00:00'}`
+  }
+  const hour = PRECISION_PLACEHOLDER_HOUR[form.foundTimePrecision] ?? 0
+  return `${form.foundTimeDate}T${String(hour).padStart(2, '0')}:00:00`
+}
+
 const handleSubmit = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -230,7 +299,9 @@ const handleSubmit = async () => {
       description: form.description || undefined,
       foundLocation: form.foundLocation,
       dropPointId: form.dropPointId!,
-      foundTime: form.foundTime,
+      foundTime: buildFoundTime(),
+      foundTimePrecision: form.foundTimePrecision,
+      foundTimeText: form.foundTimeText || undefined,
       images: images.length > 0 ? images : undefined,
       claimQuestion: form.claimQuestion,
       referenceAnswer: form.referenceAnswer || undefined,

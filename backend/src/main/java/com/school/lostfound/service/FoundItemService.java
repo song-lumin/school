@@ -10,7 +10,8 @@ import com.school.lostfound.vo.FoundItemVO;
 public interface FoundItemService {
     FoundItemVO publish(FoundItemRequest request, Long currentUserId);
 
-    IPage<FoundItemVO> listPublic(ItemQueryRequest request);
+    /** 公开列表；viewerId 为 null 表示未登录游客（只能看公开待认领，看不到已领取件） */
+    IPage<FoundItemVO> listPublic(ItemQueryRequest request, Long viewerId);
 
     FoundItemVO getById(Long id);
 

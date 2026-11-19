@@ -46,6 +46,31 @@ public class CameraLogServiceImpl implements CameraLogService {
     }
 
     @Override
+    public IPage<CameraLogVO> listMine(Long pointAdminId, Integer status, int page, int size) {
+        List<Long> myPointIds = dropPointMapper.selectList(new LambdaQueryWrapper<DropPoint>()
+                        .eq(DropPoint::getAdminId, pointAdminId)).stream()
+                .map(DropPoint::getId)
+                .toList();
+
+        LambdaQueryWrapper<CameraLog> query = new LambdaQueryWrapper<>();
+        if (status != null) {
+            query.eq(CameraLog::getStatus, status);
+        }
+        if (myPointIds.isEmpty()) {
+            query.eq(CameraLog::getApplicantId, pointAdminId);
+        } else {
+            query.and(w -> w.eq(CameraLog::getApplicantId, pointAdminId)
+                    .or().in(CameraLog::getDropPointId, myPointIds));
+        }
+        query.orderByAsc(CameraLog::getStatus).orderByDesc(CameraLog::getCreatedAt);
+
+        IPage<CameraLog> result = cameraLogMapper.selectPage(new Page<>(page, size), query);
+        Page<CameraLogVO> output = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        output.setRecords(result.getRecords().stream().map(this::toVO).toList());
+        return output;
+    }
+
+    @Override
     @Transactional
     public CameraLogVO create(CameraLogCreateRequest request, Long applicantId) {
         if (request.getTimeRangeStart().isAfter(request.getTimeRangeEnd())) {

@@ -12,3 +12,15 @@ target/
 *.iml
 .superpowers/
 .worktrees/
+
+# 本地中间产物与大数据备份（不入库）
+.docx_work/
+.report_extract.md
+demo-data/uploads-old/
+demo-data/images/
+demo-data/*.jpg
+demo-data/*.jpeg
+demo-data/*.png
+demo-data/*.json
+demo-data/backup-*.sql
+scripts/*.log

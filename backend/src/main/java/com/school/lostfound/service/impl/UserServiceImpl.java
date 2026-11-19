@@ -5,9 +5,11 @@ import com.school.lostfound.dto.LoginRequest;
 import com.school.lostfound.dto.RegisterRequest;
 import com.school.lostfound.dto.UpdatePasswordRequest;
 import com.school.lostfound.dto.UpdateProfileRequest;
+import com.school.lostfound.entity.CreditLog;
 import com.school.lostfound.entity.User;
 import com.school.lostfound.enums.UserRole;
 import com.school.lostfound.exception.BusinessException;
+import com.school.lostfound.mapper.CreditLogMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.UserService;
 import com.school.lostfound.utils.JwtUtil;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
+    private final CreditLogMapper creditLogMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
@@ -136,6 +139,14 @@ public class UserServiceImpl implements UserService {
     private UserVO convertToVO(User user) {
         UserVO vo = new UserVO();
         BeanUtils.copyProperties(user, vo);
+        if (user != null && user.getId() != null) {
+            // 误领次数单独成字段：MISCLAIM_COUNT 是 0 分计次凭证，已从积分明细里过滤掉，
+            // 想展示误领情况只能在这里统计
+            long misclaimCount = creditLogMapper.selectCount(new LambdaQueryWrapper<CreditLog>()
+                    .eq(CreditLog::getUserId, user.getId())
+                    .eq(CreditLog::getOperationType, "MISCLAIM_COUNT"));
+            vo.setMisclaimCount((int) misclaimCount);
+        }
         return vo;
     }
 }

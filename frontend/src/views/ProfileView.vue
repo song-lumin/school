@@ -37,6 +37,10 @@
           <el-descriptions-item v-if="isNormalUser" label="诚信积分">
             <el-tag type="warning">{{ userStore.userInfo.creditScore }}</el-tag>
           </el-descriptions-item>
+          <el-descriptions-item v-if="isNormalUser && (userStore.userInfo.misclaimCount ?? 0) > 0" label="误领次数">
+            <el-tag type="danger">{{ userStore.userInfo.misclaimCount }} 次</el-tag>
+            <span class="field-tip">认领物品与实际不符并被核实，不扣分但记录在案</span>
+          </el-descriptions-item>
           <el-descriptions-item v-if="isNormalUser" label="光荣榜展示">
             <el-switch
               v-model="allowLeaderboard"
@@ -63,10 +67,17 @@
               <el-descriptions-item label="成功归还奖励（拾取者）" span="2">+3 分。失主现场核对无误、签字合影确认领取后，自动发放给招领发布人。</el-descriptions-item>
               <el-descriptions-item label="成功归还奖励（失主）" span="2">+1 分。失主现场确认领取后自动发放，鼓励及时认领。</el-descriptions-item>
               <el-descriptions-item label="转发推荐奖励" span="2">+1 分。把公开招领转发到某条寻物启事，若该启事发布者最终通过此转发链路认领成功，转发者自动获得 1 分（回滚规则同上）。</el-descriptions-item>
-              <el-descriptions-item label="扣分/回滚" span="2">虚假招领、举报成立、申诉判定发错实物：已发积分将回滚；答错防伪问题累计 3 次锁定 24 小时（不直接扣分，但会降低认领置信度）。</el-descriptions-item>
+              <el-descriptions-item label="扣分/回滚" span="2">
+                虚假招领、举报成立、申诉判定发错实物：已发积分将回滚；答错防伪问题累计 3 次锁定 24 小时（不直接扣分，但会降低认领置信度）。
+              </el-descriptions-item>
+              <el-descriptions-item label="积分下限与黑名单" span="2">
+                诚信积分最低扣至 <b>-5</b>，不会继续变负；扣到 -5 时账号自动进入黑名单（暂停登录、认领与发布，已发布招领不再接收新申请）。
+                如认为处理有误可向系统管理员申诉，管理员核实解封后积分清零重新计算。
+              </el-descriptions-item>
             </el-descriptions>
             <p style="color:#89958f;font-size:12px;margin:0">
               台账"类型"列对应：CHECK_ISSUE=巡检核对发的发布奖励；PICKUP_ISSUE=领取完成时的拾取者/失主奖励；FORWARD_REWARD=转发推荐奖励；带负数的为回滚/扣减。
+              误领次数不计分、只在「我的资料」里单独显示，不会出现在本台账的 0 分记录中。
             </p>
           </el-collapse-item>
         </el-collapse>

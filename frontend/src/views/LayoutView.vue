@@ -18,6 +18,9 @@
           <el-menu-item index="/notices">寻物启事</el-menu-item>
           <el-menu-item index="/claims" v-if="userStore.isLoggedIn">认领管理</el-menu-item>
           <el-menu-item index="/feedback" v-if="userStore.isLoggedIn">反馈中心</el-menu-item>
+          <el-menu-item index="/messages" v-if="userStore.isLoggedIn">
+            消息中心<span class="msg-menu-badge" v-if="unreadCount > 0">{{ unreadCount }}</span>
+          </el-menu-item>
 
 
           <el-menu-item index="/point-admin" v-if="userStore.isPointAdmin || userStore.isAdmin">
@@ -28,7 +31,11 @@
           </el-menu-item>
         </el-menu>
         <div class="header-right">
+          <span class="build-tag" title="看到这个标记说明加载的是最新构建">新版 v2</span>
           <template v-if="userStore.isLoggedIn">
+            <el-badge :value="unreadCount" :max="99" :hidden="unreadCount === 0" class="msg-bell">
+              <el-icon :size="19" @click="$router.push('/messages')"><Bell /></el-icon>
+            </el-badge>
             <el-dropdown @command="handleCommand">
               <span class="user-info">
                 <el-icon><User /></el-icon>
@@ -61,17 +68,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { authApi } from '@/api'
+import { authApi, messageApi } from '@/api'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const activeMenu = computed(() => route.path)
+
+// 站内消息未读角标
+const unreadCount = ref(0)
+let unreadTimer: number | undefined
+
+const refreshUnread = async () => {
+  if (!userStore.isLoggedIn) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const res = await messageApi.unreadCount()
+    unreadCount.value = Number(res.data?.count || 0)
+  } catch (e) {
+    // 静默失败：未登录或后端未就绪时不打扰用户
+  }
+}
+
+onMounted(() => {
+  refreshUnread()
+  unreadTimer = window.setInterval(refreshUnread, 60000)
+})
+
+onUnmounted(() => {
+  if (unreadTimer) window.clearInterval(unreadTimer)
+})
 
 const handleCommand = async (command: string) => {
   if (command === 'logout') {
@@ -180,6 +213,31 @@ const handleCommand = async (command: string) => {
   border-bottom-width: 2px;
 }
 
+.msg-bell {
+  cursor: pointer;
+  color: #5b6961;
+  padding: 0 10px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.msg-bell:hover {
+  color: #26745c;
+}
+
+.msg-menu-badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  color: #fff;
+  background: #c0392b;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
 .header-right {
   display: flex;
   align-items: center;
@@ -218,6 +276,18 @@ const handleCommand = async (command: string) => {
   color: #89958e;
   border-top: 1px solid #e4ebe6;
   font-size: 12px;
+}
+
+.build-tag {
+  font-size: 12px;
+  line-height: 1;
+  color: #5f6b7d;
+  background: #eef2f7;
+  border: 1px solid #dde4ee;
+  border-radius: 10px;
+  padding: 5px 9px;
+  margin-right: 12px;
+  white-space: nowrap;
 }
 
 .layout-footer p {

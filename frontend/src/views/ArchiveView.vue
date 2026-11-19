@@ -40,8 +40,17 @@
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="图片" width="80">
           <template #default="{ row }">
-            <el-image v-if="row.images && row.images.length" :src="row.images[0]" :preview-src-list="row.images" fit="cover" style="width:48px;height:48px;border-radius:4px" preview-teleported />
-            <span v-else style="color:#ccc">-</span>
+            <el-image
+              v-if="row.images && row.images.length && !isPlaceholderImage(row.images[0])"
+              :src="row.images[0]"
+              :preview-src-list="row.images"
+              fit="cover"
+              style="width:48px;height:48px;border-radius:4px"
+              preview-teleported
+            >
+              <template #error><div class="thumb-fallback"><el-icon><Box /></el-icon></div></template>
+            </el-image>
+            <div v-else class="thumb-fallback"><el-icon><Box /></el-icon></div>
           </template>
         </el-table-column>
         <el-table-column label="物品" min-width="200">
@@ -82,6 +91,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { archiveApi, dropPointApi } from '@/api'
+import { Box } from '@element-plus/icons-vue'
+
+const isPlaceholderImage = (src?: string) => !src || src.includes('example.com')
 
 interface ArchiveItem {
   id: number
@@ -185,4 +197,6 @@ onMounted(async () => {
 .stat-label { font-size: 13px; color: #666; margin-top: 2px; }
 .item-link { color: #26745c; font-weight: 500; }
 .sub-text { font-size: 12px; color: #999; margin-top: 2px; }
+.thumb-fallback { display: grid; place-items: center; width: 48px; height: 48px; color: #b9c2bd; background: #f2f6f3; border-radius: 4px; }
+.thumb-fallback .el-icon { font-size: 20px; }
 </style>

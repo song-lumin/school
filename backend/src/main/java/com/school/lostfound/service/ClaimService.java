@@ -26,4 +26,7 @@ public interface ClaimService {
     IPage<ClaimApplyVO> listMy(Long currentUserId, int page, int size);
 
     IPage<ClaimApplyVO> listForReview(Long currentUserId, Integer status, int page, int size);
+
+    /** 每日清理残留的锁定申请：按物品状态与驳回次数各归各位，返回处理的申请条数 */
+    int releaseStaleLocks();
 }

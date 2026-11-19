@@ -46,6 +46,8 @@ public class ReportServiceImpl implements ReportService {
     private static final int STATUS_PENDING = 0;
     private static final int STATUS_VALID = 1;
     private static final int STATUS_INVALID = 2;
+    /** 同一用户 24 小时内最多提交的举报条数 */
+    private static final int MAX_DAILY_REPORTS = 5;
 
     private final ReportLogMapper reportLogMapper;
     private final FoundItemMapper foundItemMapper;
@@ -99,6 +101,27 @@ public class ReportServiceImpl implements ReportService {
             targetTitle = item.getTitle();
         }
 
+        // 频控与去重：举报直接进管理员队列，此前可无限刷
+        LambdaQueryWrapper<ReportLog> samePending = new LambdaQueryWrapper<ReportLog>()
+                .eq(ReportLog::getReporterId, reporterId)
+                .eq(ReportLog::getStatus, STATUS_PENDING)
+                .eq(ReportLog::getTargetType, targetType);
+        if ("NOTICE".equals(targetType)) {
+            samePending.eq(ReportLog::getNoticeId, report.getNoticeId());
+        } else {
+            samePending.eq(ReportLog::getItemId, report.getItemId());
+        }
+        if (reportLogMapper.selectCount(samePending) > 0) {
+            throw new BusinessException(409, "你对该目标已有一条待处理举报，请等待管理员处理后再提交");
+        }
+        long daily = reportLogMapper.selectCount(new LambdaQueryWrapper<ReportLog>()
+                .eq(ReportLog::getReporterId, reporterId)
+                .ge(ReportLog::getCreatedAt, LocalDateTime.now().minusDays(1)));
+        if (daily >= MAX_DAILY_REPORTS) {
+            throw new BusinessException(429,
+                    "24 小时内最多提交 " + MAX_DAILY_REPORTS + " 条举报（已提交 " + daily + " 条），请明天再试");
+        }
+
         reportLogMapper.insert(report);
         log.info("举报已提交：reportId={}, type={}", report.getId(), targetType);
         return toVO(report, null, targetTitle);
@@ -124,7 +147,8 @@ public class ReportServiceImpl implements ReportService {
                 .toList();
         Map<Long, String> reporterNames = reporterIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(reporterIds).stream()
-                        .collect(Collectors.toMap(User::getId, User::getRealName));
+                        .collect(Collectors.toMap(User::getId,
+                                u -> u.getRealName() == null ? "" : u.getRealName(), (a, b) -> a));
 
         List<Long> itemIds = result.getRecords().stream()
                 .map(ReportLog::getItemId)
@@ -191,6 +215,8 @@ public class ReportServiceImpl implements ReportService {
 
         rollbackSingle(publisherId, "PICKUP_ISSUE", 3, item.getId(), reason, operatorId);
         rollbackSingle(publisherId, "CHECK_ISSUE", 1, item.getId(), reason, operatorId);
+        // 举报成立说明该笔招领整体作废，转发带来的 +1 一并撤回
+        rollbackForwardReward(item, reason, operatorId);
 
         item.setItemStatus(ItemStatus.VOIDED.getCode());
         item.setTakedownReason(reason);
@@ -209,13 +235,49 @@ public class ReportServiceImpl implements ReportService {
         log.info("举报成立处理完成：reportId={}, itemId={}", report.getId(), item.getId());
     }
 
+    /**
+     * 举报成立、整条招领作废时，把转发带来的 +1 撤回；只在该物品上确实发过 FORWARD_REWARD 时扣分。
+     */
+    private void rollbackForwardReward(FoundItem item, String reason, Long operatorId) {
+        if (item == null || item.getForwarderId() == null) {
+            return;
+        }
+        Long forwarderId = item.getForwarderId();
+        Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
+        if (forwarderId.equals(publisherId)) {
+            return;
+        }
+
+        LambdaQueryWrapper<CreditLog> issuedWrapper = new LambdaQueryWrapper<>();
+        issuedWrapper.eq(CreditLog::getUserId, forwarderId)
+                .eq(CreditLog::getOperationType, "FORWARD_REWARD")
+                .eq(CreditLog::getRelatedItemId, item.getId());
+        if (creditLogMapper.selectCount(issuedWrapper) == 0) {
+            return;
+        }
+
+        LambdaQueryWrapper<CreditLog> rollbackWrapper = new LambdaQueryWrapper<>();
+        rollbackWrapper.eq(CreditLog::getUserId, forwarderId)
+                .eq(CreditLog::getOperationType, "ROLLBACK")
+                .eq(CreditLog::getRelatedItemId, item.getId())
+                .eq(CreditLog::getChangeAmount, -1);
+        if (creditLogMapper.selectCount(rollbackWrapper) > 0) {
+            return;
+        }
+
+        creditService.issueCredit(forwarderId, -1, "ROLLBACK", item.getId(), null,
+                "举报成立 · 转发奖励回滚：" + reason, operatorId);
+    }
+
     private void rollbackSingle(Long userId, String operationType, int amount,
                                 Long itemId, String reason, Long operatorId) {
         LambdaQueryWrapper<CreditLog> issuedWrapper = new LambdaQueryWrapper<>();
         issuedWrapper.eq(CreditLog::getUserId, userId)
                 .eq(CreditLog::getOperationType, operationType)
-                .eq(CreditLog::getRelatedItemId, itemId);
-        if (creditLogMapper.selectCount(issuedWrapper) == 0) {
+                .eq(CreditLog::getRelatedItemId, itemId)
+                .eq(CreditLog::getChangeAmount, amount);
+        long issued = creditLogMapper.selectCount(issuedWrapper);
+        if (issued == 0) {
             return;
         }
 
@@ -224,11 +286,16 @@ public class ReportServiceImpl implements ReportService {
                 .eq(CreditLog::getOperationType, "ROLLBACK")
                 .eq(CreditLog::getRelatedItemId, itemId)
                 .eq(CreditLog::getChangeAmount, -amount);
-        if (creditLogMapper.selectCount(rollbackWrapper) > 0) {
+        long rolled = creditLogMapper.selectCount(rollbackWrapper);
+
+        // 按净额回滚：同一物品可能发生过多次成交，只有未被回滚的那几笔才需要扣
+        long net = issued - rolled;
+        if (net <= 0) {
             return;
         }
 
-        creditService.issueCredit(userId, -amount, "ROLLBACK", itemId, null, reason, operatorId);
+        creditService.issueCredit(userId, (int) (-amount * net), "ROLLBACK", itemId, null,
+                reason, operatorId);
     }
 
 

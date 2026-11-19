@@ -41,6 +41,8 @@ import java.util.stream.Collectors;
 public class FoundItemServiceImpl implements FoundItemService {
 
     private static final int MAX_WEEKLY_PUBLISH = 3;
+    /** 未公开草稿（待投放）不占每周公开额度，但同时最多挂 5 条，防批量灌数据 */
+    private static final int MAX_PENDING_DRAFTS = 5;
     private static final int NEW_USER_DAYS = 7;
 
     private final FoundItemMapper foundItemMapper;
@@ -59,8 +61,18 @@ public class FoundItemServiceImpl implements FoundItemService {
         checkWeeklyLimit(currentUserId);
 
         if (riskControlService.containsSensitiveWord(request.getTitle())
-                || riskControlService.containsSensitiveWord(request.getDescription())) {
+                || riskControlService.containsSensitiveWord(request.getDescription())
+                || riskControlService.containsSensitiveWord(request.getFoundTimeText())) {
             throw new BusinessException(400, "内容包含敏感词，请修改后重新发布");
+        }
+
+        // 拾取时间允许模糊：精度只接受 0-5，模糊描述最长 60 字（DTO 已限长，这里兜住空白串）
+        Integer precision = request.getFoundTimePrecision();
+        if (precision != null && (precision < 0 || precision > 5)) {
+            throw new BusinessException(400, "拾取时间精度不合法");
+        }
+        if (request.getFoundTime() != null && request.getFoundTime().isAfter(LocalDateTime.now())) {
+            throw new BusinessException(400, "拾取时间不能晚于当前时间");
         }
 
         User founder = userMapper.selectById(currentUserId);
@@ -79,6 +91,10 @@ public class FoundItemServiceImpl implements FoundItemService {
         item.setDescription(request.getDescription());
         item.setFoundLocation(request.getFoundLocation());
         item.setFoundTime(request.getFoundTime());
+        // 模糊时间：precision 缺省按 0（精确）落库，描述为空则存 NULL，前端无描述时按日期+时段词展示
+        item.setFoundTimePrecision(request.getFoundTimePrecision() == null ? 0 : request.getFoundTimePrecision());
+        String foundTimeText = request.getFoundTimeText() == null ? null : request.getFoundTimeText().trim();
+        item.setFoundTimeText(foundTimeText == null || foundTimeText.isEmpty() ? null : foundTimeText);
         item.setImages(request.getImages());
         item.setClaimQuestion(request.getClaimQuestion());
         item.setReferenceAnswer(request.getReferenceAnswer());
@@ -118,13 +134,30 @@ public class FoundItemServiceImpl implements FoundItemService {
     }
 
     @Override
-    public IPage<FoundItemVO> listPublic(ItemQueryRequest request) {
+    public IPage<FoundItemVO> listPublic(ItemQueryRequest request, Long viewerId) {
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
-        // 默认查公开物品；显式传 itemStatus 时按传入状态查（如冒领申诉需列出已取件物品）
-        if (request.getItemStatus() != null) {
-            wrapper.eq(FoundItem::getItemStatus, request.getItemStatus());
+        // 公开列表只对外暴露两种状态：公开待认领(1)、已领取(3，供被冒领人核对)
+        // 其余状态（作废0/丢失8/待投放6/归还中7/超期5/归档4）一律不对外，
+        // 否则未登录用户传 itemStatus 就能枚举全部下架件与内部处理中的物品
+        int queryStatus = request.getItemStatus() == null
+                ? ItemStatus.PUBLIC.getCode() : request.getItemStatus();
+        if (queryStatus != ItemStatus.PUBLIC.getCode()
+                && queryStatus != ItemStatus.PICKED_UP.getCode()) {
+            queryStatus = ItemStatus.PUBLIC.getCode();
+        }
+
+        // 「已领取」只给本人核对用：游客一律返回空（不能匿名枚举别人领走了哪些东西）；
+        // 登录用户也只能看到与自己相关的记录 —— 自己发布的、或自己认领过的
+        if (queryStatus == ItemStatus.PICKED_UP.getCode()) {
+            if (viewerId == null) {
+                return new Page<>(request.getPage(), request.getSize());
+            }
+            wrapper.eq(FoundItem::getItemStatus, queryStatus)
+                    .and(w -> w.eq(FoundItem::getFounderId, viewerId)
+                            .or().apply("EXISTS (SELECT 1 FROM claim_apply ca "
+                                    + "WHERE ca.item_id = found_item.id AND ca.claimer_id = {0})", viewerId));
         } else {
-            wrapper.eq(FoundItem::getItemStatus, ItemStatus.PUBLIC.getCode());
+            wrapper.eq(FoundItem::getItemStatus, queryStatus);
         }
 
         if (StringUtils.hasText(request.getKeyword())) {
@@ -188,6 +221,24 @@ public class FoundItemServiceImpl implements FoundItemService {
         }
         if (!item.getItemStatus().equals(ItemStatus.PENDING_PLACEMENT.getCode())) {
             throw new BusinessException(409, "只有待投放状态的物品可以标记已投放");
+        }
+
+        // 草稿不占额度，但「点已投放」这一步就是真正占用每周公开额度的时刻：
+        // 不公开不审核也不受限，一旦要公开就必须过 3 条上限
+        long publishedThisWeek = foundItemMapper.selectCount(new LambdaQueryWrapper<FoundItem>()
+                .eq(FoundItem::getFounderId, currentUserId)
+                .in(FoundItem::getItemStatus,
+                        ItemStatus.PUBLIC.getCode(),
+                        ItemStatus.CLAIMING.getCode(),
+                        ItemStatus.PICKED_UP.getCode(),
+                        ItemStatus.RETURNING.getCode(),
+                        ItemStatus.EXPIRED.getCode(),
+                        // 作废件同样占额度：否则「投放→作废→再发」可以无限循环绕过周限额
+                        ItemStatus.VOIDED.getCode())
+                .ge(FoundItem::getPublishedAt, LocalDateTime.now().minus(7, ChronoUnit.DAYS)));
+        if (publishedThisWeek >= MAX_WEEKLY_PUBLISH) {
+            throw new BusinessException(429,
+                    "本周已公开 3 条招领，额度已用完。草稿可留在「待投放」不占额度，下周再点已投放");
         }
 
         // 物品转为公开待认领
@@ -263,16 +314,34 @@ public class FoundItemServiceImpl implements FoundItemService {
         return convertPage(page);
     }
 
-    private void checkWeeklyLimit(Long userId) {        LocalDateTime weekAgo = LocalDateTime.now().minus(7, ChronoUnit.DAYS);
+    /**
+     * 发布时的额度检查，按「未公开不占额度」口径分两层：
+     * 1）每周公开额度 3 条：只统计真正进过公开池的（公开/认领中/已领取/归还中/超期）；
+     * 2）草稿上限 5 条：待投放(6)不算公开、不需审核，但同时挂太多要拦，防批量灌数据。
+     */
+    private void checkWeeklyLimit(Long userId) {
+        LocalDateTime weekAgo = LocalDateTime.now().minus(7, ChronoUnit.DAYS);
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FoundItem::getFounderId, userId)
                 .in(FoundItem::getItemStatus,
                         ItemStatus.PUBLIC.getCode(),
                         ItemStatus.CLAIMING.getCode(),
-                        ItemStatus.PICKED_UP.getCode())
+                        ItemStatus.PICKED_UP.getCode(),
+                        ItemStatus.RETURNING.getCode(),
+                        ItemStatus.EXPIRED.getCode(),
+                        // 作废件同样占额度：否则「投放→作废→再发」可以无限循环绕过周限额
+                        ItemStatus.VOIDED.getCode())
                 .ge(FoundItem::getPublishedAt, weekAgo);
         if (foundItemMapper.selectCount(wrapper) >= MAX_WEEKLY_PUBLISH) {
-            throw new BusinessException(429, "每周最多发布3条有效招领，请下周再试");
+            throw new BusinessException(429, "每周最多公开 3 条招领（待投放草稿不占额度），请下周再试");
+        }
+
+        LambdaQueryWrapper<FoundItem> draftWrapper = new LambdaQueryWrapper<>();
+        draftWrapper.eq(FoundItem::getFounderId, userId)
+                .eq(FoundItem::getItemStatus, ItemStatus.PENDING_PLACEMENT.getCode());
+        if (foundItemMapper.selectCount(draftWrapper) >= MAX_PENDING_DRAFTS) {
+            throw new BusinessException(429,
+                    "待投放草稿最多 5 条，请先把实物投放并点「已投放」，或作废不再需要的草稿");
         }
     }
 
@@ -300,21 +369,45 @@ public class FoundItemServiceImpl implements FoundItemService {
                 : userMapper.selectBatchIds(founderIds);
 
         Map<Long, String> founderNames = founders.stream()
-                .collect(Collectors.toMap(User::getId, User::getRealName));
+                .collect(Collectors.toMap(User::getId,
+                        u -> u.getRealName() == null ? "" : u.getRealName(), (a, b) -> a));
 
         Map<Long, User> foundersById = founders.stream()
                 .collect(Collectors.toMap(User::getId, user -> user, (a,b) -> a));
 
-        Map<Long, String> dropPointNames = dropPointIds.isEmpty() ? java.util.Collections.emptyMap()
-                : dropPointMapper.selectBatchIds(dropPointIds).stream()
-                        .collect(Collectors.toMap(DropPoint::getId, DropPoint::getName));
+        List<DropPoint> dropPoints = dropPointIds.isEmpty() ? List.of()
+                : dropPointMapper.selectBatchIds(dropPointIds);
+
+        Map<Long, String> dropPointNames = dropPoints.stream()
+                .collect(Collectors.toMap(DropPoint::getId, DropPoint::getName));
+
+        List<Long> pointAdminIds = dropPoints.stream()
+                .map(DropPoint::getAdminId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, User> pointAdmins = pointAdminIds.isEmpty() ? java.util.Collections.emptyMap()
+                : userMapper.selectBatchIds(pointAdminIds).stream()
+                        .collect(Collectors.toMap(User::getId, user -> user, (a, b) -> a));
+        Map<Long, Long> pointAdminIdByPoint = dropPoints.stream()
+                .filter(dp -> dp.getAdminId() != null)
+                .collect(Collectors.toMap(DropPoint::getId, DropPoint::getAdminId, (a, b) -> a));
 
         return items.stream()
-                .map(item -> FoundItemVO.fromEntity(
-                        item,
-                        founderNames.get(item.getFounderId()),
-                        dropPointNames.get(item.getDropPointId()),
-                        isNewUser(foundersById.get(item.getFounderId()), item)))
+                .map(item -> {
+                    FoundItemVO vo = FoundItemVO.fromEntity(
+                            item,
+                            founderNames.get(item.getFounderId()),
+                            dropPointNames.get(item.getDropPointId()),
+                            isNewUser(foundersById.get(item.getFounderId()), item));
+                    Long adminId = pointAdminIdByPoint.get(item.getDropPointId());
+                    User admin = adminId == null ? null : pointAdmins.get(adminId);
+                    if (admin != null) {
+                        vo.setDropPointAdminName(admin.getRealName());
+                        vo.setDropPointAdminPhone(admin.getPhone());
+                    }
+                    return vo;
+                })
                 .collect(Collectors.toList());
     }
 

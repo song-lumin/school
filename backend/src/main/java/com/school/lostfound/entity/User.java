@@ -28,6 +28,9 @@ public class User {
 
     private Integer creditScore;
 
+    /** 误领/冒领次数（非恶意误领只记次不扣分） */
+    private Integer misclaimCount;
+
     private Integer status;
 
     private Integer allowLeaderboard;

@@ -46,18 +46,38 @@
               <!-- 已通过待取件：失主到现场后自己操作 -->
               <template v-if="row.applyStatus === 4">
                 <el-alert type="warning" :closable="false" style="margin-bottom: 8px">
-                  请前往投放点自行找物核对：找到本人物品→上传签字合影确认领取；不是本人→取消认领
+                  请前往投放点自行找物核对：找到本人物品→上传签字合影确认领取；现场找不到实物→报站点核查；不是本人→取消认领
+                  <div class="station-contact">
+                    <span class="sc-point">
+                      <el-icon><Location /></el-icon>
+                      {{ row.dropPointName || '投放点' }}
+                      <small v-if="row.dropPointLocation">（{{ row.dropPointLocation }}）</small>
+                    </span>
+                    <span v-if="row.dropPointAdminPhone" class="sc-phone">
+                      负责人 {{ row.dropPointAdminName || '站点管理员' }} · {{ row.dropPointAdminPhone }}
+                    </span>
+                    <span v-else class="sc-phone sc-muted">站点电话未登记，到站直接向服务台出示本条申请</span>
+                  </div>
                 </el-alert>
-                <el-button size="small" type="success" :disabled="acting" @click="openPickupDialog(row)">
-                  现场确认领取（签字合影）
-                </el-button>
-                <el-button size="small" type="danger" plain :disabled="acting" @click="handleCancelPickup(row)">
-                  不是我的，取消认领
-                </el-button>
+                <div class="action-stack">
+                  <el-button size="small" type="success" :disabled="acting" @click="openPickupDialog(row)">
+                    现场确认领取（签字合影）
+                  </el-button>
+                  <el-button size="small" type="warning" plain :disabled="acting" @click="openNotFoundDialog(row)">
+                    找不到物品，报站点核查
+                  </el-button>
+                  <el-button size="small" type="danger" plain :disabled="acting" @click="handleCancelPickup(row)">
+                    不是我的，取消认领
+                  </el-button>
+                </div>
               </template>
               <el-alert v-else-if="row.applyStatus === 1" type="info" :closable="false" style="margin-bottom: 6px">
                 已领取成功。自领取日起 7 天内为保障期：如有物品不符、调监控核对等需求可申诉；
                 <span v-if="warrantyDeadline(row)">保障截止 {{ warrantyDeadline(row) }}，逾期将无法再申请调取监控或系统申诉。</span>
+                <div style="margin-top: 4px; color: #e6a23c">
+                  若已领取后发现不是自己的物品：请在保障期内到「反馈中心」发起「物品不符」申诉；申诉通过后物品转为「待归还」，
+                  请将实物送回原投放点，站点确认「归还入库」后物品重新公开，真正的失主才能继续认领。
+                </div>
               </el-alert>
               <span v-else class="no-action">-</span>
             </template>
@@ -177,6 +197,34 @@
 
 
 
+    <el-dialog v-model="notFoundDialogVisible" title="找不到物品，报站点核查" width="540px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 14px"
+        title="提交后由投放点核查实物是否在站：实物在站→通知你重新核对；从未实际投放→招领作废、发布人回滚积分；被他人拿走→物品转「丢失待查」。三种结果都不扣你的诚信分。"
+      />
+      <p style="margin: 0 0 12px; color: #606266">
+        物品：<b>{{ notFoundClaim?.itemTitle || ('#' + notFoundClaim?.itemId) }}</b>
+      </p>
+      <el-input
+        v-model="notFoundDesc"
+        type="textarea"
+        :rows="4"
+        maxlength="1000"
+        show-word-limit
+        placeholder="说明现场情况：例如 09:30 到图书馆一层服务台，货架 A 区未见该物品，已询问站点无人知晓"
+      />
+      <div style="margin-top: 12px">
+        <div style="font-size: 13px; color: #606266; margin-bottom: 6px">现场照片（可选，建议拍空货架或站点全貌）</div>
+        <EvidenceUpload v-model="notFoundImages" :max="4" />
+      </div>
+      <template #footer>
+        <el-button @click="notFoundDialogVisible = false">取消</el-button>
+        <el-button type="warning" :loading="acting" @click="submitNotFound">提交核查申请</el-button>
+      </template>
+    </el-dialog>
+
     <PickupDialog
       ref="pickupDialogRef"
       v-model:visible="pickupDialogVisible"
@@ -189,10 +237,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { claimApi, foundItemApi } from '@/api'
+import { Location } from '@element-plus/icons-vue'
+import { claimApi, foundItemApi, disputeApi } from '@/api'
 import { CLAIM_STATUS_MAP, ITEM_STATUS_MAP } from '@/types'
 import type { ClaimApply, FoundItem } from '@/types'
 import PickupDialog from '@/components/PickupDialog.vue'
+import EvidenceUpload from '@/components/EvidenceUpload.vue'
 
 const loading = ref(false)
 const acting = ref(false)
@@ -385,6 +435,43 @@ const openPickupDialog = (row: ClaimApply) => {
   pickupDialogRef.value?.init()
 }
 
+// 找不到物品：报站点核查
+const notFoundDialogVisible = ref(false)
+const notFoundClaim = ref<ClaimApply | null>(null)
+const notFoundDesc = ref('')
+const notFoundImages = ref<string[]>([])
+
+const openNotFoundDialog = (row: ClaimApply) => {
+  notFoundClaim.value = row
+  notFoundDesc.value = ''
+  notFoundImages.value = []
+  notFoundDialogVisible.value = true
+}
+
+const submitNotFound = async () => {
+  if (!notFoundClaim.value) return
+  if (!notFoundDesc.value.trim()) {
+    ElMessage.warning('请描述现场找不到物品的情况')
+    return
+  }
+  acting.value = true
+  try {
+    await disputeApi.create({
+      disputeType: 'ITEM_NOT_FOUND',
+      applyId: notFoundClaim.value.id,
+      description: notFoundDesc.value.trim(),
+      evidenceImages: notFoundImages.value
+    })
+    ElMessage.success('已提交，投放点核查后会给出结论')
+    notFoundDialogVisible.value = false
+    fetchMyClaims()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || '提交失败')
+  } finally {
+    acting.value = false
+  }
+}
+
 onMounted(fetchMyClaims)
 </script>
 
@@ -413,6 +500,23 @@ onMounted(fetchMyClaims)
 .no-action {
   color: #c0c4cc;
 }
+
+.action-stack { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.action-stack .el-button + .el-button { margin-left: 0; }
+
+.station-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(230, 162, 60, 0.45);
+  font-size: 12px;
+}
+.sc-point { display: inline-flex; align-items: center; gap: 4px; color: #8a5a00; }
+.sc-point small { color: #a8834a; }
+.sc-phone { color: #26745c; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sc-muted { color: #909399; font-weight: 400; }
 
 .collapse-title {
   display: flex;

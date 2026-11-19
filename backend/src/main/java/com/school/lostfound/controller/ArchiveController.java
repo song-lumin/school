@@ -35,12 +35,36 @@ public class ArchiveController {
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
-            @RequestParam(required = false) Integer bizGroup) {
+            @RequestParam(required = false) Integer bizGroup,
+            org.springframework.security.core.Authentication authentication) {
+
+        Long operatorId = (Long) authentication.getPrincipal();
+        boolean isSysAdmin = authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SYS_ADMIN"));
+
+        // 站点管理员只能查自己负责点位的留档：不传点位默认就是本点位，传别人的点位直接拒绝
+        List<Long> scopedPointIds = null;
+        if (!isSysAdmin) {
+            scopedPointIds = dropPointMapper.selectList(new LambdaQueryWrapper<com.school.lostfound.entity.DropPoint>()
+                            .eq(com.school.lostfound.entity.DropPoint::getAdminId, operatorId)).stream()
+                    .map(com.school.lostfound.entity.DropPoint::getId)
+                    .toList();
+            if (dropPointId != null && !scopedPointIds.contains(dropPointId)) {
+                throw new com.school.lostfound.exception.BusinessException(403, "只能查看本点位留档");
+            }
+            if (scopedPointIds.isEmpty()) {
+                return Result.success(List.of());
+            }
+        }
 
         LambdaQueryWrapper<FoundItem> wrapper = new LambdaQueryWrapper<>();
         // 留档范围：0作废(含下架)、3已领取、5超期
         wrapper.in(FoundItem::getItemStatus, 0, 3, 5);
-        if (dropPointId != null) wrapper.eq(FoundItem::getDropPointId, dropPointId);
+        if (scopedPointIds != null) {
+            wrapper.in(FoundItem::getDropPointId, scopedPointIds);
+        } else if (dropPointId != null) {
+            wrapper.eq(FoundItem::getDropPointId, dropPointId);
+        }
         if (category != null && !category.isBlank()) wrapper.eq(FoundItem::getCategory, category);
         if (keyword != null && !keyword.isBlank()) {
             wrapper.and(w -> w.like(FoundItem::getTitle, keyword)

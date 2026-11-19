@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>校园失物招领系统 · 按角色分泳道流程图</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 20px 40px; background: #f5f7f6; color: #22302a;
+         font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { max-width: 1340px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 8px; letter-spacing: .3px; }
+  .sub { font-size: 13px; color: #61736a; line-height: 1.7; margin: 0 0 18px; }
+  .sub b { color: #26745c; }
+  .scroll { overflow-x: auto; padding-bottom: 4px; }
+  .grid { display: grid; grid-template-columns: 116px repeat(5, minmax(176px, 1fr));
+          gap: 8px; min-width: 1100px; }
+  .hcell { font-size: 12.5px; font-weight: 700; padding: 9px 10px; border-radius: 8px;
+           text-align: center; line-height: 1.35; }
+  .hcell small { display: block; font-weight: 400; font-size: 11px; opacity: .8; margin-top: 2px; }
+  .h1c { background: #e7f0f7; color: #23577e; border: 1px solid #b9d3e5; }
+  .h4c { background: #e4f2ea; color: #1f5f4b; border: 1px solid #b6ddd0; }
+  .h5c { background: #e6eff3; color: #14556b; border: 1px solid #b4cdd6; }
+  .hcell.stage { background: #eceeed; color: #4a5a52; border: 1px solid #dadee0; font-weight: 600; }
+  .cell { background: #fff; border: 1px solid #e2e8e4; border-radius: 8px; padding: 9px 10px;
+          font-size: 11.5px; line-height: 1.6; border-left-width: 3px; border-left-style: solid;
+          border-left-color: #cfd8d3; }
+  .cell.b1, .cell.b2, .cell.b3 { border-left-color: #7ea8c6; }
+  .cell.b4 { border-left-color: #3f9a79; background: #fcfefd; }
+  .cell.b5 { border-left-color: #2f7288; }
+  .cell .t { font-weight: 600; color: #1d2a23; }
+  .cell .m { color: #5b6c63; }
+  .cell .hand { display: inline-block; margin-top: 5px; font-size: 10.5px; color: #8a5a1f;
+                background: #fdf3e3; border: 1px solid #f0d9b5; border-radius: 4px; padding: 1px 5px; }
+  .cell .ok { color: #26745c; font-weight: 600; }
+  .cell .bad { color: #a83d3d; font-weight: 600; }
+  .dash { color: #c3ccc7; }
+  .stage { font-size: 11.5px; background: #f0f2f1; border: 1px solid #e2e8e4; border-radius: 8px;
+           padding: 9px 8px; line-height: 1.5; color: #34443c; border-left: 3px solid #a9b6ae; }
+  .stage .num { display: inline-grid; place-items: center; width: 17px; height: 17px;
+                border-radius: 50%; background: #2f5e4d; color: #fff; font-size: 10.5px;
+                font-weight: 700; margin-right: 5px; vertical-align: 1px; }
+  .stage .nm { font-weight: 700; display: block; margin-top: 3px; font-size: 12px; }
+  .stage .sk { color: #7b8b83; font-size: 10.5px; display: block; margin-top: 2px; }
+  .legend { margin-top: 18px; background: #fff; border: 1px solid #e2e8e4; border-radius: 10px;
+            padding: 14px 16px; font-size: 12px; color: #4d5c55; line-height: 1.9; }
+  .legend h2 { font-size: 13px; margin: 0 0 8px; color: #22302a; }
+  .legend .row { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .note { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e2e8e4; color: #6b7c73; }
+  .note b { color: #a83d3d; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>校园失物招领及诚信积分系统 · 按角色分泳道流程图</h1>
+  <p class="sub">
+    横轴是角色，纵轴是时间。每一格只写该角色在系统里真实能做的动作；
+    <b>黄色小标签</b>表示跨角色的交接点。user1 / user2 / user3 都是普通用户（权限完全相同），差别只在这条演示故事线里承担的角色。
+  </p>
+
+  <div class="scroll">
+    <div class="grid">
+
+      <div class="hcell stage">阶段</div>
+      <div class="hcell h1c">user1 · 拾获者<small>捡到东西并发布</small></div>
+      <div class="hcell h1c">user2 · 失主<small>认领并取件</small></div>
+      <div class="hcell h1c">user3 · 误领者<small>拿错后归还 / 申诉</small></div>
+      <div class="hcell h4c">pointadmin1 · 站点<small>图书馆失物招领处</small></div>
+      <div class="hcell h5c">admin · 系统管理员<small>定责 · 审核 · 配置</small></div>
+
+      <!-- 1 -->
+      <div class="stage"><span class="num">1</span><span class="nm">账号准备</span><span class="sk">入口</span></div>
+      <div class="cell b1"><span class="t">注册 / 登录</span><br><span class="m">填实名与手机号——后续纠纷要凭这个电话联系你</span></div>
+      <div class="cell b2"><span class="t">注册 / 登录</span><br><span class="m">同一套账号体系，无额外门槛</span></div>
+      <div class="cell b3"><span class="t">注册 / 登录</span><br><span class="m">同一套账号体系</span></div>
+      <div class="cell b4"><span class="t">被指定为点位负责人</span><br><span class="m">登录后进「投放点管理」，只看得到自己负责的站点</span></div>
+      <div class="cell b5"><span class="t">建点位并分配负责人</span><br><span class="m">「站点管理」填写名称/位置/负责人 ID/是否装监控</span></div>
+
+      <!-- 2 -->
+      <div class="stage"><span class="num">2</span><span class="nm">拾获 → 发布</span><span class="sk">产生招领帖</span></div>
+      <div class="cell b1"><span class="t">发布招领帖</span><br><span class="m">分类·拾获地点·图片·验证问题，状态「待投放」</span><span class="hand">↓ 实物送到站点</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="dash">—</span></div>
+      <div class="cell b4"><span class="t">接收实物</span><br><span class="m">物品线下交到图书馆一层服务台，等待巡检</span></div>
+      <div class="cell b5"><span class="dash">—</span><br><span class="m">此时不介入</span></div>
+
+      <!-- 3 -->
+      <div class="stage"><span class="num">3</span><span class="nm">确认投放</span><span class="sk">待投放 → 公开</span></div>
+      <div class="cell b1"><span class="t">收到通知，诚信分 +1</span><br><span class="m">物品真正可被认领后才加分</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="dash">—</span></div>
+      <div class="cell b4"><span class="t">「在站管理清单」核对并确认投放</span><br><span class="m">实物与描述一致 → 点「核对发分」→ 状态「公开」</span><span class="hand">↓ 系统自动发分</span></div>
+      <div class="cell b5"><span class="dash">—</span><br><span class="m">可通过留档抽查</span></div>
+
+      <!-- 4 -->
+      <div class="stage"><span class="num">4</span><span class="nm">失主挂失</span><span class="sk">匹配招领帖</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="t">发布丢失启事</span><br><span class="m">丢失时间·地点·特征；系统按分类与图片相似度推送匹配的招领帖</span></div>
+      <div class="cell b3"><span class="dash">—</span><br><span class="m">（也会在公开列表看到该物品）</span></div>
+      <div class="cell b4"><span class="dash">—</span><br><span class="m">可见本点位在站待认领物品</span></div>
+      <div class="cell b5"><span class="dash">—</span></div>
+
+      <!-- 5 -->
+      <div class="stage"><span class="num">5</span><span class="nm">提交认领</span><span class="sk">申请 → 审核</span></div>
+      <div class="cell b1"><span class="t">审核认领申请</span><br><span class="m">作为发布人，判断对方回答的验证问题是否对得上（如挂坠形状）</span></div>
+      <div class="cell b2"><span class="t">提交认领申请</span><br><span class="m">回答验证问题 + 留言，状态「待审核」</span><span class="hand">↓ 待审</span></div>
+      <div class="cell b3"><span class="t">也会提交认领</span><br><span class="m">本例中后续拿到后发现不是自己的</span></div>
+      <div class="cell b4"><span class="t">本点位物品可直接审核</span><br><span class="m">发布人 / 本点位站点 / 系统管理员，三者之一即可通过</span></div>
+      <div class="cell b5"><span class="t">争议时可代审</span><br><span class="m">系统管理员对任意物品都有审核权，用于仲裁</span></div>
+
+      <!-- 6 -->
+      <div class="stage"><span class="num">6</span><span class="nm">通过 → 待取件</span><span class="sk">锁定其他申请</span></div>
+      <div class="cell b1"><span class="t">物品转「认领中」</span><br><span class="m">其他认领申请被锁为「锁定」，避免一人多领</span></div>
+      <div class="cell b2"><span class="t">「我的认领」看到取件码</span><br><span class="m">同时显示站点名称、位置、负责人电话</span></div>
+      <div class="cell b3"><span class="dash">—</span><br><span class="m">若被选中则走同一流程</span></div>
+      <div class="cell b4"><span class="t">备好实物与认领书</span><br><span class="m">等失主到站现场取件</span></div>
+      <div class="cell b5"><span class="dash">—</span></div>
+
+      <!-- 7 -->
+      <div class="stage"><span class="num">7</span><span class="nm">现场取件</span><span class="sk">完成 · 加分</span></div>
+      <div class="cell b1"><span class="t">诚信分 +1</span><br><span class="m">物品成功交付后到账</span></div>
+      <div class="cell b2"><span class="ok">本人点「确认取件」</span><br><span class="m">出示取件码、签认领书、与物品合影 → 状态「已完成」，诚信分 +3</span><span class="hand">↓ 现场核凭证</span></div>
+      <div class="cell b3"><span class="dash">—</span></div>
+      <div class="cell b4"><span class="t">现场见证</span><br><span class="m">核对取件码与凭证；系统里不代点确认（只能认领人本人点）</span></div>
+      <div class="cell b5"><span class="dash">—</span></div>
+
+      <!-- 8 -->
+      <div class="stage"><span class="num">8</span><span class="nm">拿错 → 不符</span><span class="sk">物品转待归还</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="bad">取消认领「不是我的」</span><br><span class="m">物品转「待归还」；此前被锁的其他申请自动解锁，真正失主可继续认领</span></div>
+      <div class="cell b4"><span class="t">收到待归还提醒</span><br><span class="m">在站清单标红，等实物回站</span></div>
+      <div class="cell b5"><span class="dash">—</span><br><span class="m">若已产生积分争议再介入</span></div>
+
+      <!-- 9 -->
+      <div class="stage"><span class="num">9</span><span class="nm">归还入库</span><span class="sk">再公开</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="t">可以重新申请认领</span><br><span class="m">物品回到公开池，之前被误领不影响你</span></div>
+      <div class="cell b3"><span class="t">把东西送回站点</span><br><span class="m">线下交回服务台</span><span class="hand">↓ 交回实物</span></div>
+      <div class="cell b4"><span class="t">点「确认归还入库」</span><br><span class="m">物品从「待归还」回到「公开」，重新可认领</span></div>
+      <div class="cell b5"><span class="dash">—</span><br><span class="m">全过程入留档</span></div>
+
+      <!-- 10 -->
+      <div class="stage"><span class="num">10</span><span class="nm">异常 A：找不到物品</span><span class="sk">线下找物 + 调监控</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="t">提交「找不到物品」工单</span><br><span class="m">附现场照片等证据；系统立即通知该物品的站点负责人</span></div>
+      <div class="cell b4"><span class="ok">拿到工单 → 找物 → 调监控 → 回填事实</span><br><span class="m">消息里有申诉人电话；点「调监控」发起调取申请；核实后在「纠纷核验」写事实（不写结论）</span><span class="hand">↓ 事实回填</span></div>
+      <div class="cell b5"><span class="t">审批监控调取并留痕</span><br><span class="m">「监控调取」列表批准/拒绝，写明调取范围与结果</span></div>
+
+      <!-- 11 -->
+      <div class="stage"><span class="num">11</span><span class="nm">定责：三选一</span><span class="sk">积分与状态</span></div>
+      <div class="cell b1"><span class="dash">—</span><br><span class="m">可能被牵连（虚假投放）</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="t">收到结论通知</span><br><span class="m">在站则重新取件；从未投放则免责</span></div>
+      <div class="cell b4"><span class="t">按结论执行线下动作</span><br><span class="m">交件 / 归档 / 上报丢失待查</span><span class="hand">↑ 依据定责</span></div>
+      <div class="cell b5"><span class="t">出结论并改数据</span><br><span class="m">FOUND 在站误报｜NOT_DELIVERED 从未投放 → 作废+回滚+扣 2 分｜STOLEN 被拿走 → 丢失待查，发布人无责</span></div>
+
+      <!-- 12 -->
+      <div class="stage"><span class="num">12</span><span class="nm">异常 B：不符 / 损坏</span><span class="sk">现场核验 → 定责</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="t">提「物品不符」或「物品损坏」</span><br><span class="m">拍损坏部位、附证据图</span></div>
+      <div class="cell b4"><span class="ok">现场核验并回填</span><br><span class="m">损坏位置与程度、交付凭证是否齐全、画面时间点——只写看到的事实</span><span class="hand">↓ 事实</span></div>
+      <div class="cell b5"><span class="t">据事实定责</span><br><span class="m">不符 / 损坏分别出结论，决定积分是否回滚；损坏物品不再回公开池</span></div>
+
+      <!-- 13 -->
+      <div class="stage"><span class="num">13</span><span class="nm">举报与申诉</span><span class="sk">第三方介入</span></div>
+      <div class="cell b1"><span class="t">被举报时</span><br><span class="m">虚假投放成立 → 物品作废、拾获积分回滚、可能封号</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="t">也可举报他人</span><br><span class="m">虚假投放 / 描述不符，必须填证据</span></div>
+      <div class="cell b4"><span class="t">执行下架</span><br><span class="m">发现重复投放、实物不在架 →「管理员下架」填原因，记录入留档</span></div>
+      <div class="cell b5"><span class="t">「举报审查」出结论</span><br><span class="m">成立 → 作废+回滚+可封禁；被处罚人申诉由系统管理员复审</span></div>
+
+      <!-- 14 -->
+      <div class="stage"><span class="num">14</span><span class="nm">积分与风控</span><span class="sk">长期治理</span></div>
+      <div class="cell b1"><span class="t">「诚信分」查明细</span><br><span class="m">看加分/扣分记录与排行榜</span></div>
+      <div class="cell b2"><span class="t">同上</span><br><span class="m">扣分影响后续认领优先级</span></div>
+      <div class="cell b3"><span class="t">同上</span><br><span class="m">误领次数会被记录</span></div>
+      <div class="cell b4"><span class="t">核对发放留痕</span><br><span class="m">哪件物品发了 1 分、谁核对的，都可追</span></div>
+      <div class="cell b5"><span class="t">「积分管理」「风控预警」</span><br><span class="m">台账/调整/清零（必填原因）｜串通、重复图、认领率异常三类预警</span></div>
+
+      <!-- 15 -->
+      <div class="stage"><span class="num">15</span><span class="nm">留档收尾</span><span class="sk">可追溯</span></div>
+      <div class="cell b1"><span class="dash">—</span></div>
+      <div class="cell b2"><span class="dash">—</span></div>
+      <div class="cell b3"><span class="dash">—</span></div>
+      <div class="cell b4"><span class="t">查本点位留档</span><br><span class="m">过期、下架、已领取过保的记录都在「留档」</span></div>
+      <div class="cell b5"><span class="t">查全部留档</span><br><span class="m">物品过期/作废/过保自动归档，全流程可回溯</span></div>
+
+    </div>
+  </div>
+
+  <div class="legend">
+    <h2>读图说明</h2>
+    <div class="row">
+      <span class="chip"><span class="dot" style="background:#7ea8c6"></span>普通用户（user1/2/3 权限完全相同）</span>
+      <span class="chip"><span class="dot" style="background:#3f9a79"></span>站点管理员 pointadmin1（管线下实物）</span>
+      <span class="chip"><span class="dot" style="background:#2f7288"></span>系统管理员 admin（管线上定责）</span>
+      <span class="chip"><span class="dot" style="background:#e0bf8f"></span>黄色小标签 = 跨角色交接点</span>
+    </div>
+    <div class="note">
+      <b>三条硬规则：</b>① 认领审核可由发布人 / 本点位站点 / 系统管理员任一方完成，但取件确认只能认领人本人点；
+      ② 站点只能看、只能写自己点位的工单与物品，读不了用户库、积分调整、定责接口；
+      ③ 站点回填的是<b>事实</b>，定责与积分只能由系统管理员出，且定责人不得是自己点位负责人（回避）。
+    </div>
+  </div>
+</div>
+</body>
+</html>

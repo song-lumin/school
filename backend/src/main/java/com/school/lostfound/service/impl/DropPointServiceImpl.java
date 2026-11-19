@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.school.lostfound.dto.CheckRequest;
 import com.school.lostfound.dto.DropPointRequest;
 import com.school.lostfound.entity.ClaimApply;
+import com.school.lostfound.entity.Dispute;
 import com.school.lostfound.entity.DropPoint;
 import com.school.lostfound.entity.FoundItem;
 import com.school.lostfound.entity.HandInLog;
@@ -12,16 +13,19 @@ import com.school.lostfound.enums.ClaimStatus;
 import com.school.lostfound.enums.ItemStatus;
 import com.school.lostfound.exception.BusinessException;
 import com.school.lostfound.mapper.ClaimApplyMapper;
+import com.school.lostfound.mapper.DisputeMapper;
 import com.school.lostfound.mapper.DropPointMapper;
 import com.school.lostfound.mapper.FoundItemMapper;
 import com.school.lostfound.mapper.HandInLogMapper;
 import com.school.lostfound.mapper.UserMapper;
 import com.school.lostfound.service.CreditService;
 import com.school.lostfound.service.DropPointService;
+import com.school.lostfound.service.MessageService;
 import com.school.lostfound.vo.ClaimApplyVO;
 import com.school.lostfound.vo.DropPointVO;
 import com.school.lostfound.vo.InventoryItemVO;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,18 +35,24 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DropPointServiceImpl implements DropPointService {
 
     private static final int CHECK_ISSUE_CREDIT = 1;
+    /** 「物品损坏」纠纷类型：损坏件回收后必须作废，绝不重回公开待认领池 */
+    private static final String DISPUTE_TYPE_ITEM_DAMAGED = "ITEM_DAMAGED";
+    private static final int DISPUTE_STATUS_APPROVED = 1;
 
     private final DropPointMapper dropPointMapper;
     private final UserMapper userMapper;
     private final FoundItemMapper foundItemMapper;
     private final HandInLogMapper handInLogMapper;
     private final ClaimApplyMapper claimApplyMapper;
+    private final DisputeMapper disputeMapper;
     private final CreditService creditService;
+    private final MessageService messageService;
 
     @Override
     public List<DropPointVO> listAll() {
@@ -55,26 +65,32 @@ public class DropPointServiceImpl implements DropPointService {
                 .distinct()
                 .toList();
 
-        Map<Long, String> adminNames = adminIds.isEmpty() ? Map.of()
+        Map<Long, User> adminUsers = adminIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(adminIds).stream()
-                        .collect(Collectors.toMap(User::getId, User::getRealName));
+                        .collect(Collectors.toMap(User::getId, u -> u, (a, b) -> a));
 
         return dropPoints.stream()
-                .map(dp -> DropPointVO.fromEntity(dp, adminNames.get(dp.getAdminId())))
+                .map(dp -> {
+                    User admin = adminUsers.get(dp.getAdminId());
+                    return DropPointVO.fromEntity(dp,
+                            admin == null ? null : admin.getRealName(),
+                            admin == null ? null : admin.getPhone(),
+                            admin == null ? null : admin.getEmail());
+                })
                 .collect(Collectors.toList());
     }
 
     @Override
     public DropPointVO getById(Long id) {
         DropPoint dropPoint = getDropPointOrThrow(id);
-        String adminName = null;
+        User admin = null;
         if (dropPoint.getAdminId() != null) {
-            User admin = userMapper.selectById(dropPoint.getAdminId());
-            if (admin != null) {
-                adminName = admin.getRealName();
-            }
+            admin = userMapper.selectById(dropPoint.getAdminId());
         }
-        return DropPointVO.fromEntity(dropPoint, adminName);
+        return DropPointVO.fromEntity(dropPoint,
+                admin == null ? null : admin.getRealName(),
+                admin == null ? null : admin.getPhone(),
+                admin == null ? null : admin.getEmail());
     }
 
     @Override
@@ -111,9 +127,16 @@ public class DropPointServiceImpl implements DropPointService {
         wrapper.eq(FoundItem::getDropPointId, id)
                 .in(FoundItem::getItemStatus,
                         ItemStatus.PUBLIC.getCode(),
-                        ItemStatus.CLAIMING.getCode());
+                        ItemStatus.CLAIMING.getCode(),
+                        // 站内还有实物或有待线下动作的件也不能停站：否则没人认领/确认归还/处置，流程悬空
+                        ItemStatus.PICKED_UP.getCode(),
+                        ItemStatus.PENDING_PLACEMENT.getCode(),
+                        ItemStatus.RETURNING.getCode(),
+                        ItemStatus.LOST.getCode(),
+                        ItemStatus.EXPIRED.getCode());
         if (foundItemMapper.selectCount(wrapper) > 0) {
-            throw new BusinessException(409, "站点下还有未处理完的物品，无法删除");
+            throw new BusinessException(409,
+                    "站点下还有未闭环的物品（待投放/认领中/已取件/待归还/丢失待查/超期），请先处理完再停用");
         }
 
         dropPoint.setStatus(0);
@@ -167,7 +190,8 @@ public class DropPointServiceImpl implements DropPointService {
                 .toList();
         Map<Long, String> claimerNames = claimerIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(claimerIds).stream()
-                        .collect(Collectors.toMap(User::getId, User::getRealName));
+                        .collect(Collectors.toMap(User::getId,
+                                u -> u.getRealName() == null ? "" : u.getRealName(), (a, b) -> a));
 
         return applies.stream()
                 .map(apply -> ClaimApplyVO.fromEntity(
@@ -212,6 +236,81 @@ public class DropPointServiceImpl implements DropPointService {
                 item.getId(), null, "物品巡检通过", operatorId);
     }
     @Override
+    @Transactional
+    public String returnIn(Long dropPointId, Long itemId, Long operatorId) {
+        DropPoint dropPoint = getDropPointOrThrow(dropPointId);
+
+        FoundItem item = foundItemMapper.selectById(itemId);
+        if (item == null) {
+            throw new BusinessException(404, "物品不存在");
+        }
+        if (!dropPointId.equals(item.getDropPointId())) {
+            throw new BusinessException(400, "物品不属于该站点");
+        }
+        if (!item.getItemStatus().equals(ItemStatus.RETURNING.getCode())) {
+            throw new BusinessException(409, "只有「待归还」的物品可以确认入库");
+        }
+
+        // 损坏件绝不重回公开池：该物品只要存在「物品损坏」定责通过的记录，入库即作废归档
+        boolean damagedVerdict = disputeMapper.selectCount(new LambdaQueryWrapper<Dispute>()
+                .eq(Dispute::getItemId, itemId)
+                .eq(Dispute::getDisputeType, DISPUTE_TYPE_ITEM_DAMAGED)
+                .eq(Dispute::getStatus, DISPUTE_STATUS_APPROVED)) > 0;
+
+        com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<FoundItem> updateWrapper =
+                new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
+        updateWrapper.eq(FoundItem::getId, itemId)
+                .set(FoundItem::getItemStatus,
+                        damagedVerdict ? ItemStatus.VOIDED.getCode() : ItemStatus.PUBLIC.getCode());
+        if (damagedVerdict) {
+            updateWrapper.set(FoundItem::getTakedownReason, "纠纷定责：物品损坏，作废不再重新公开")
+                    .set(FoundItem::getTakedownAt, LocalDateTime.now())
+                    .set(FoundItem::getTakedownBy, operatorId);
+        } else {
+            updateWrapper.set(FoundItem::getClaimedAt, null);
+        }
+        foundItemMapper.update(null, updateWrapper);
+
+        Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
+
+        ClaimApply lastApply = claimApplyMapper.selectOne(new LambdaQueryWrapper<ClaimApply>()
+                .eq(ClaimApply::getItemId, itemId)
+                .eq(ClaimApply::getCreditRollback, 1)
+                .orderByDesc(ClaimApply::getId)
+                .last("LIMIT 1"));
+
+        if (damagedVerdict) {
+            messageService.push(publisherId, "损坏件已作废 · 不再重新公开",
+                    "你的招领物品「" + item.getTitle() + "」经「物品损坏」定责后，已由「" + dropPoint.getName()
+                            + "」确认收回并作废归档。损坏件不会再进入公开待认领池，也不会再次对外开放认领；"
+                            + "物品归属仍为你，如另有完好副本可重新发布。",
+                    "RETURN", item.getId(), null);
+            if (lastApply != null) {
+                messageService.push(lastApply.getClaimerId(), "损坏物品已收回 · 作废归档",
+                        "物品「" + item.getTitle() + "」已由「" + dropPoint.getName()
+                                + "」确认收回。因该件已定责为「物品损坏」，不会再重新公开待认领，本次流程到此结束。感谢你把物品送回站点。",
+                        "RETURN", item.getId(), lastApply.getId());
+            }
+            log.info("损坏件入库作废：itemId={}, dropPointId={}, operator={}", itemId, dropPointId, operatorId);
+            return "VOIDED";
+        }
+
+        // 归还入库后通知双方：物品归属不变，已重新公开待认领
+        messageService.push(publisherId, "物品已归还入库 · 重新公开待认领",
+                "你的招领物品「" + item.getTitle() + "」已被误领人送回「" + dropPoint.getName()
+                        + "」并由站点确认入库，现重新公开待认领。此前被判无效的成交若已回滚拾获奖励，真失主再次认领取件时会重新结算；下一位认领人仍会正常获得认领奖励。物品归属仍为你。",
+                "RETURN", item.getId(), null);
+
+        if (lastApply != null) {
+            messageService.push(lastApply.getClaimerId(), "物品已收回 · 感谢归还",
+                    "物品「" + item.getTitle() + "」已由「" + dropPoint.getName()
+                            + "」确认收回入库，并重新公开待认领。感谢你把物品送回站点。",
+                    "RETURN", item.getId(), lastApply.getId());
+        }
+        return "PUBLIC";
+    }
+
+    @Override
     public List<InventoryItemVO> getInventory(Long dropPointId) {
         getDropPointOrThrow(dropPointId);
 
@@ -235,7 +334,8 @@ public class DropPointServiceImpl implements DropPointService {
                 .filter(Objects::nonNull).distinct().toList();
         Map<Long, String> founderNames = founderIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(founderIds).stream()
-                        .collect(Collectors.toMap(User::getId, User::getRealName));
+                        .collect(Collectors.toMap(User::getId,
+                                u -> u.getRealName() == null ? "" : u.getRealName(), (a, b) -> a));
 
         LambdaQueryWrapper<ClaimApply> claimWrapper = new LambdaQueryWrapper<>();
         claimWrapper.in(ClaimApply::getItemId, itemIds)

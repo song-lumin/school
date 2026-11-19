@@ -154,16 +154,20 @@
         <el-card>
           <div style="margin-bottom: 12px">
             <el-select v-model="disputeFilter.status" placeholder="状态" clearable style="width: 140px; margin-right: 12px">
-              <el-option label="待处理" :value="0" />
-              <el-option label="已通过" :value="1" />
-              <el-option label="已驳回" :value="2" />
+              <el-option label="未处理" :value="0" />
+              <el-option label="处理中（站点已接手）" :value="3" />
+              <el-option label="已处理 · 通过" :value="1" />
+              <el-option label="已处理 · 驳回" :value="2" />
             </el-select>
             <el-select v-model="disputeFilter.disputeType" placeholder="类型" clearable style="width: 160px; margin-right: 12px">
               <el-option label="物品不符" value="ITEM_MISMATCH" />
+              <el-option label="物品损坏" value="ITEM_DAMAGED" />
+              <el-option label="找不到物品" value="ITEM_NOT_FOUND" />
               <el-option label="其他纠纷" value="OTHER" />
               <el-option label="物品被冒领" value="FALSE_CLAIM" />
             </el-select>
             <el-button type="primary" @click="loadAdminDisputes">查询</el-button>
+            <el-button @click="triggerEscalate" :loading="escalating">立即跑一次站点催办</el-button>
           </div>
           <el-table :data="adminDisputes" v-loading="disputesLoading" stripe>
             <el-table-column prop="id" label="工单号" width="80" />
@@ -179,6 +183,19 @@
               <template #default="{ row }">{{ row.itemTitle || ('#' + row.itemId) }}</template>
             </el-table-column>
             <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+            <el-table-column label="站点核验" width="140">
+              <template #default="{ row }">
+                <el-tag v-if="row.pointCheckedAt" size="small" type="success">已回填</el-tag>
+                <el-tag v-else-if="row.pointSlaOverdue" size="small" type="danger">超时未响应</el-tag>
+                <el-tag v-else size="small" type="warning">待核验</el-tag>
+                <div v-if="!row.pointCheckedAt && row.pointRemindCount > 0" class="sub-meta">
+                  已催办 {{ row.pointRemindCount }} 次
+                </div>
+                <div v-if="row.siteUnresponsive === 1" class="sub-meta danger-text">
+                  已标记站点未响应
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }">
                 <el-tag :type="DISPUTE_STATUS_MAP[row.status]?.type">
@@ -189,6 +206,8 @@
             <el-table-column label="操作" width="110" fixed="right">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openHandleDialog(row)">处理</el-button>
+                <el-button link type="warning" @click="openChat(row)">沟通</el-button>
+                <el-tag v-if="row.status === 3" size="small" type="primary" style="margin-left:6px">待定责</el-tag>
               </template>
             </el-table-column>
           </el-table>
@@ -221,8 +240,10 @@
           <el-table v-else :data="riskWarnings" v-loading="riskLoading" stripe>
             <el-table-column label="预警类型" width="140">
               <template #default="{ row }">
-                <el-tag :type="row.warningType === 'COLLUSION' ? 'danger' : 'warning'">
-                  {{ row.warningType === 'COLLUSION' ? '疑似串通' : row.warningType === 'DUPLICATE_IMAGE' ? '图片疑似重复' : '认领率异常' }}
+                <el-tag :type="row.warningType === 'COLLUSION' || row.warningType === 'MISCLAIM_FREQUENT' ? 'danger' : 'warning'">
+                  {{ row.warningType === 'COLLUSION' ? '疑似串通'
+                    : row.warningType === 'DUPLICATE_IMAGE' ? '图片疑似重复'
+                    : row.warningType === 'MISCLAIM_FREQUENT' ? '高频误领' : '认领率异常' }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -296,6 +317,12 @@
             <el-table-column prop="adminName" label="站点管理员" width="110">
               <template #default="{ row }">{{ row.adminName || '未分配' }}</template>
             </el-table-column>
+            <el-table-column label="联系电话" width="130">
+              <template #default="{ row }">
+                <span v-if="row.adminPhone" class="station-phone">{{ row.adminPhone }}</span>
+                <el-tag v-else size="small" type="danger" effect="plain">未登记</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="监控" width="90">
               <template #default="{ row }">
                 <el-tag :type="row.hasCamera === 1 ? 'success' : 'info'" size="small">
@@ -365,6 +392,8 @@
       </template>
     </el-dialog>
 
+    <ChatDialog v-model:visible="chatVisible" :dispute-id="chatDisputeId" title="沟通 · 申诉人与站点负责人" />
+
     <!-- 申诉处理对话框 -->
     <el-dialog v-model="handleDialogVisible" title="处理申诉工单" width="620px">
       <el-descriptions v-if="handling" :column="2" border style="margin-bottom: 16px">
@@ -386,22 +415,134 @@
           </template>
           <span v-else>无</span>
         </el-descriptions-item>
+        <el-descriptions-item label="投放点" :span="2">
+          <span v-if="handling.dropPointName">{{ handling.dropPointName }}</span>
+          <span v-else>未关联投放点</span>
+          <span v-if="handling.dropPointAdminName" class="station-phone">
+            · 站点负责人 {{ handling.dropPointAdminName }}
+            <template v-if="handling.dropPointAdminPhone"> {{ handling.dropPointAdminPhone }}</template>
+            <template v-else>（未登记电话）</template>
+          </span>
+        </el-descriptions-item>
+        <el-descriptions-item label="现场核验" :span="2">
+          <div v-if="handling.pointCheckNote">
+            <div class="point-check-note">{{ handling.pointCheckNote }}</div>
+            <div class="point-check-meta">
+              {{ handling.pointCheckerName || '站点管理员' }}
+              <span v-if="handling.pointCheckStandIn" class="standin-tag">代填</span>
+              · {{ (handling.pointCheckedAt || '').replace('T', ' ').slice(0, 16) }}
+            </div>
+            <div v-if="handling.pointCheckStandIn" class="point-check-meta">
+              站点负责人未在岗，本条由系统管理员电话核实后代填，已同步通知站点负责人留痕。
+            </div>
+          </div>
+          <div v-else class="point-check-missing-wrap">
+            <div class="point-check-missing">
+              <el-tag :type="handling.pointSlaOverdue ? 'danger' : 'warning'" size="small">
+                {{ handling.pointSlaOverdue ? '超 24h 未响应' : '站点尚未回填' }}
+              </el-tag>
+              <span>
+                已等待 {{ handling.pendingHours ?? 0 }} 小时，线下事实未核验。
+                站点是兼职岗、不一定在岗：建议先电话联系负责人；
+                联系不上可自行核实后代填，结论里写明核实方式。
+              </span>
+            </div>
+            <div v-if="(handling.pointRemindCount ?? 0) > 0" class="sla-line">
+              系统已催办 {{ handling.pointRemindCount }} 次，最近一次
+              {{ (handling.pointEscalatedAt || '').replace('T', ' ').slice(0, 16) }}。
+            </div>
+            <div v-if="handling.siteUnresponsive === 1" class="sla-line danger-text">
+              本单已标记「站点未响应」（{{ (handling.siteUnresponsiveAt || '').replace('T', ' ').slice(0, 16) }}）。
+            </div>
+          </div>
+        </el-descriptions-item>
       </el-descriptions>
+
+      <el-collapse v-if="handling && !handling.pointCheckNote" v-model="standInCollapse" style="margin-bottom: 14px">
+        <el-collapse-item name="standin">
+          <template #title>
+            <span class="standin-title">站点不在岗？由我核实后代填现场事实</span>
+          </template>
+          <el-input
+            v-model="standInNote"
+            type="textarea"
+            :rows="3"
+            maxlength="1000"
+            show-word-limit
+            placeholder="例：10:35 致电图书馆服务台，负责人今日休班，由当班同学代为查找，货架 A 区未见该物品，该区监控可用。"
+          />
+          <div class="standin-actions">
+            <span class="standin-hint">代填会以你的账号留痕，并自动通知站点负责人「本条已由系统代填」。</span>
+            <el-button type="primary" size="small" :loading="standInSubmitting" @click="submitStandIn">代填现场核验</el-button>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
+      <el-alert
+        v-if="handling?.disputeType === 'ITEM_NOT_FOUND'"
+        type="info"
+        :closable="false"
+        style="margin-bottom: 14px"
+      >
+        <div v-if="handlingPoint">
+          核查站点：<b>{{ handlingPoint.name }}</b>
+          <span v-if="handlingPoint.location">（{{ handlingPoint.location }}）</span>
+          <span v-if="handlingPoint.adminPhone" class="station-phone">
+            · 负责人 {{ handlingPoint.adminName || '站点管理员' }} {{ handlingPoint.adminPhone }}
+          </span>
+          <span v-else style="color: #909399">· 站点电话未登记，请到服务站现场核实</span>
+        </div>
+        <div v-else>正在读取站点信息…</div>
+        <div style="margin-top: 4px; color: #606266; font-size: 12px">
+          下结论前先拨打站点电话确认实物是否在架，再据实选择三种结论。
+        </div>
+      </el-alert>
+
+      <el-alert
+        v-if="handling && !handling.pointCheckNote"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom: 14px"
+        title="站点仍未回填现场核验。确认处理后，系统会自动把本单标记为「站点未响应」并记录标记时间，标记不可撤销。"
+      />
+
       <el-form label-width="90px">
-        <el-form-item label="处理结果">
+        <el-form-item label="处理结论">
           <el-radio-group v-model="handleForm.approved">
-            <el-radio :value="true">通过（回滚积分 + 物品作废）</el-radio>
-            <el-radio :value="false">驳回</el-radio>
+            <el-radio :value="true">通过（申诉成立，按下面勾选回滚）</el-radio>
+            <el-radio :value="false">驳回（不成立，不回滚任何积分）</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="处理意见" required>
+        <el-form-item label="回滚积分">
+          <el-checkbox-group v-model="handleForm.rollbackItems" :disabled="!handleForm.approved" class="rollback-group">
+            <el-checkbox value="PUBLISH_CHECK">招领方 · 投放分 +1（发布招领时发放的 1 分）</el-checkbox>
+            <el-checkbox value="PUBLISH_PICKUP">招领方 · 认领分 +3（物品被领取时发放的 3 分）</el-checkbox>
+            <el-checkbox value="FORWARD">转发方 · 转发分 +1（转发这条招领发放的 1 分）</el-checkbox>
+            <el-checkbox value="CLAIMER">认领方 · 认领分 +1（认领人取件时发放的 1 分）</el-checkbox>
+          </el-checkbox-group>
+          <div class="form-hint">
+            只勾选本次要撤回的分；没有真实发放过的项，系统自动跳过，不会扣成负数。
+          </div>
+        </el-form-item>
+        <el-form-item label="物品处置">
+          <el-select v-model="handleForm.itemDispose" style="width: 300px">
+            <el-option label="不改动（只处理积分）" value="NONE" />
+            <el-option label="作废归档（不再重新公开）" value="VOIDED" />
+            <el-option label="转「丢失待查」" value="LOST" />
+            <el-option label="转「待归还」（站点收回后重新公开）" value="RETURNING" />
+            <el-option label="重新公开（回公开池待认领）" value="PUBLIC" />
+          </el-select>
+          <div class="form-hint">不改物品状态就只动积分；要收回实物请选「待归还」或「作废归档」。</div>
+        </el-form-item>
+        <el-form-item label="回滚原因" required>
           <el-input
             v-model="handleForm.handlerNote"
             type="textarea"
             :rows="3"
             maxlength="1000"
             show-word-limit
-            placeholder="填写处理依据和结论"
+            placeholder="写明为什么这样回滚：依据哪条规则、站点反馈了什么、证据是什么"
           />
         </el-form-item>
       </el-form>
@@ -514,7 +655,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts'
-import { adminApi, disputeApi, riskControlApi, reportApi, dropPointAdminApi, dropPointApi, cameraLogAdminApi, creditApi } from '@/api'
+import { adminApi, disputeApi, riskControlApi, reportApi, dropPointAdminApi, dropPointApi, cameraLogAdminApi, creditApi, foundItemApi } from '@/api'
 import type {
   DisputeVO,
   RiskWarningVO,
@@ -525,6 +666,7 @@ import type {
 } from '@/types'
 import type { CameraLog } from '@/api'
 import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP, REPORT_TYPE_MAP, REPORT_STATUS_MAP } from '@/types'
+import ChatDialog from '@/components/ChatDialog.vue'
 
 const activeTab = ref('dashboard')
 
@@ -751,8 +893,52 @@ const disputeSize = ref(10)
 const disputeTotal = ref(0)
 const handleDialogVisible = ref(false)
 const handling = ref<DisputeVO | null>(null)
-const handleForm = ref({ approved: true, handlerNote: '' })
+const handlingPoint = ref<{ name: string; location?: string; adminName?: string; adminPhone?: string } | null>(null)
+const handleForm = ref<{ approved: boolean; rollbackItems: string[]; itemDispose: string; handlerNote: string }>(
+  { approved: true, rollbackItems: [], itemDispose: 'NONE', handlerNote: '' }
+)
 const submitting = ref(false)
+
+// 站点回填 SLA：手动触发一次催办扫描（定时任务每小时也会跑）
+const escalating = ref(false)
+const triggerEscalate = async () => {
+  escalating.value = true
+  try {
+    const res = await disputeApi.escalate()
+    const n = Number(res.data ?? 0)
+    ElMessage.success(n > 0
+      ? `已生成 ${n} 条催办任务，可在消息中心查看`
+      : '暂无需催办的工单（未满 24h、已回填或已催满 3 次）')
+    await loadAdminDisputes()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '催办失败')
+  } finally {
+    escalating.value = false
+  }
+}
+
+// 站点不在岗时的兜底：由系统管理员电话核实后代填现场核验
+const standInCollapse = ref<string[]>([])
+const standInNote = ref('')
+const standInSubmitting = ref(false)
+const submitStandIn = async () => {
+  if (!handling.value) return
+  if (!standInNote.value.trim()) { ElMessage.warning('请填写核实到的事实'); return }
+  standInSubmitting.value = true
+  try {
+    await disputeApi.pointCheck(handling.value.id, standInNote.value.trim())
+    ElMessage.success('已代填现场核验，站点负责人已收到留痕通知')
+    standInNote.value = ''
+    standInCollapse.value = []
+    const res = await disputeApi.getById(handling.value.id)
+    handling.value = res.data
+    await loadAdminDisputes()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '代填失败')
+  } finally {
+    standInSubmitting.value = false
+  }
+}
 
 const loadAdminDisputes = async () => {
   disputesLoading.value = true
@@ -770,10 +956,38 @@ const loadAdminDisputes = async () => {
   }
 }
 
+const chatVisible = ref(false)
+const chatDisputeId = ref<number | null>(null)
+const openChat = (row: any) => {
+  chatDisputeId.value = row.id
+  chatVisible.value = true
+}
+
 const openHandleDialog = (row: DisputeVO) => {
   handling.value = row
-  handleForm.value = { approved: true, handlerNote: '' }
+  handleForm.value = {
+    approved: true,
+    rollbackItems: [],
+    itemDispose: 'NONE',
+    handlerNote: ''
+  }
+  standInNote.value = ''
+  standInCollapse.value = []
   handleDialogVisible.value = true
+  handlingPoint.value = null
+  if (row.disputeType === 'ITEM_NOT_FOUND' && row.itemId) {
+    foundItemApi.getById(row.itemId)
+      .then((res: any) => {
+        const it = res.data || {}
+        handlingPoint.value = {
+          name: it.dropPointName || '未指定投放点',
+          location: it.dropPointLocation || it.foundLocation,
+          adminName: it.dropPointAdminName,
+          adminPhone: it.dropPointAdminPhone
+        }
+      })
+      .catch(() => { handlingPoint.value = null })
+  }
 }
 
 const submitHandle = async () => {
@@ -784,11 +998,17 @@ const submitHandle = async () => {
   }
   submitting.value = true
   try {
+    const approved = handleForm.value.approved
     await disputeApi.handle(handling.value.id, {
-      approved: handleForm.value.approved,
+      approved,
+      rollbackItems: approved ? handleForm.value.rollbackItems : [],
+      itemDispose: handleForm.value.itemDispose,
       handlerNote: handleForm.value.handlerNote.trim()
     })
-    ElMessage.success(handleForm.value.approved ? '已通过：积分已回滚，物品已作废' : '已驳回')
+    const rolled = approved && handleForm.value.rollbackItems.length
+      ? '已按勾选回滚 ' + handleForm.value.rollbackItems.length + ' 项积分'
+      : (approved ? '未勾选回滚项，积分未变动' : '已驳回，积分未变动')
+    ElMessage.success((approved ? '已通过：' : '已驳回：') + rolled + '；物品处置 = ' + handleForm.value.itemDispose)
     handleDialogVisible.value = false
     await loadAdminDisputes()
   } finally {
@@ -1000,6 +1220,18 @@ onMounted(loadDashboard)
 </script>
 
 <style scoped>
+.form-hint {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.7;
+  margin-top: 4px;
+}
+.rollback-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
 .admin-container {
   max-width: 1400px;
   margin: 0 auto;
@@ -1046,4 +1278,50 @@ onMounted(loadDashboard)
   color: #909399;
   font-size: 12px;
 }
+
+.station-phone {
+  color: #26745c;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.point-check-note {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  color: #303133;
+  font-size: 13px;
+}
+.point-check-meta {
+  margin-top: 4px;
+  color: #909399;
+  font-size: 12px;
+}
+.point-check-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #b07b16;
+  font-size: 12px;
+}
+.point-check-missing-wrap { display: flex; flex-direction: column; gap: 4px; }
+.sla-line { font-size: 12px; color: #909399; }
+.sub-meta { font-size: 11px; color: #909399; margin-top: 2px; }
+.danger-text { color: #c45656; }
+.standin-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: #fdf6ec;
+  color: #b07b16;
+  font-size: 11px;
+}
+.standin-title { font-size: 13px; color: #909399; }
+.standin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.standin-hint { color: #909399; font-size: 12px; }
 </style>

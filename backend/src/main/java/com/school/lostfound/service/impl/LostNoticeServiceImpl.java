@@ -47,6 +47,10 @@ public class LostNoticeServiceImpl implements LostNoticeService {
     private static final int SCORE_LOCATION_SIMILAR = 30;
     /** 关键词命中加分 */
     private static final int SCORE_KEYWORD = 20;
+    /** 同一用户 7 天内最多发布的寻物启事条数 */
+    private static final int MAX_WEEKLY_NOTICES = 3;
+    /** 同一用户同时处于「进行中」的启事上限，避免刷屏占版面 */
+    private static final int MAX_ACTIVE_NOTICES = 5;
 
     private final LostNoticeMapper lostNoticeMapper;
     private final UserMapper userMapper;
@@ -56,6 +60,26 @@ public class LostNoticeServiceImpl implements LostNoticeService {
     @Override
     @Transactional
     public LostNoticeVO publish(LostNoticeRequest request, Long currentUserId) {
+        // 频控：寻物启事进入公开列表、占版面，必须限流（此前可无限发）
+        LocalDateTime since = LocalDateTime.now().minusDays(7);
+        long weekly = lostNoticeMapper.selectCount(new LambdaQueryWrapper<LostNotice>()
+                .eq(LostNotice::getPublisherId, currentUserId)
+                .ge(LostNotice::getCreatedAt, since));
+        if (weekly >= MAX_WEEKLY_NOTICES) {
+            throw new BusinessException(429,
+                    "7 天内最多发布 " + MAX_WEEKLY_NOTICES + " 条寻物启事（已发 " + weekly
+                            + " 条）。额度按发布次数计算，关闭旧启事不返还额度，请下周再发；"
+                            + "已找回的请先关闭那条启事，避免继续占版面");
+        }
+        long active = lostNoticeMapper.selectCount(new LambdaQueryWrapper<LostNotice>()
+                .eq(LostNotice::getPublisherId, currentUserId)
+                .eq(LostNotice::getStatus, 0));
+        if (active >= MAX_ACTIVE_NOTICES) {
+            throw new BusinessException(429,
+                    "你同时有 " + active + " 条进行中的寻物启事（上限 " + MAX_ACTIVE_NOTICES
+                            + " 条）。请先关闭已找回的启事，再发布新的");
+        }
+
         LostNotice notice = new LostNotice();
         notice.setTitle(request.getTitle());
         notice.setCategory(request.getCategory());
@@ -102,7 +126,8 @@ public class LostNoticeServiceImpl implements LostNoticeService {
 
         Map<Long, String> publisherNames = publisherIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(publisherIds).stream()
-                        .collect(Collectors.toMap(User::getId, User::getRealName));
+                        .collect(Collectors.toMap(User::getId,
+                                u -> u.getRealName() == null ? "" : u.getRealName(), (a, b) -> a));
 
         Page<LostNoticeVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
         voPage.setRecords(result.getRecords().stream()

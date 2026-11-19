@@ -54,6 +54,8 @@ services:
     depends_on:
       - mysql
       - redis
+    volumes:
+      - uploads-data:/root/school-lost-found/uploads
     networks:
       - school-network
 
@@ -73,6 +75,7 @@ services:
 volumes:
   mysql-data:
   redis-data:
+  uploads-data:
 
 networks:
   school-network:

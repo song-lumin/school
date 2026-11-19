@@ -57,7 +57,7 @@
             <div class="found-card-copy">
               <span class="found-title">{{ item.title }}</span>
               <span class="found-location"><el-icon><Location /></el-icon>{{ item.foundLocation || '地点未填写' }}</span>
-              <span class="found-meta">{{ formatTime(item.foundTime) }}<template v-if="item.dropPointName"> · {{ item.dropPointName }}</template></span>
+              <span class="found-meta">{{ describeFoundTime(item.foundTime, item.foundTimePrecision, item.foundTimeText) }}<template v-if="item.dropPointName"> · {{ item.dropPointName }}</template></span>
             </div>
           </button>
         </div>
@@ -85,6 +85,7 @@ import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS_MAP, ITEM_CATEGORIES } from '@/types'
 import type { FoundItem, DropPoint, ItemQueryRequest } from '@/types'
 import { categoryTone } from '@/utils/placeholder'
+import { describeFoundTime } from '@/utils/foundTime'
 
 const userStore = useUserStore()
 const loading = ref(false)
@@ -103,11 +104,6 @@ const queryForm = reactive<ItemQueryRequest>({
 
 const firstImage = (item: FoundItem) => item.images?.[0]
 const isPlaceholderImage = (src: string) => src.includes('example.com')
-
-const formatTime = (time: string) => {
-  if (!time) return '-'
-  return time.replace('T', ' ').slice(0, 16)
-}
 
 const fetchItems = async () => {
   loading.value = true

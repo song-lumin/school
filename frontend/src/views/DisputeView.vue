@@ -42,12 +42,15 @@
             {{ formatTime(row.createdAt) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="showDetail(row)">详情</el-button>
+            <el-button link type="warning" @click="openChat(row)">沟通</el-button>
           </template>
         </el-table-column>
       </el-table>
+
+      <ChatDialog v-model:visible="chatVisible" :dispute-id="chatDisputeId" title="沟通 · 站点与系统管理员" />
 
       <el-pagination
         v-model:current-page="page"
@@ -72,9 +75,15 @@
         <el-form-item label="申诉类型" required>
           <el-radio-group v-model="disputeForm.disputeType">
             <el-radio value="ITEM_MISMATCH">物品不符</el-radio>
+            <el-radio value="ITEM_DAMAGED">物品损坏</el-radio>
+            <el-radio value="ITEM_NOT_FOUND">现场找不到物品</el-radio>
             <el-radio value="FALSE_CLAIM">物品被冒领</el-radio>
             <el-radio value="OTHER">其他纠纷</el-radio>
           </el-radio-group>
+          <div style="color: #909399; font-size: 12px; line-height: 1.6; margin-top: 6px">
+            「找不到物品」用于<b>已通过审核、尚未取走</b>的认领：到站货架没有实物，由投放点核查货架与监控；
+            「不符 / 损坏」是取走之后才发现的问题，定责后物品转「待归还」。
+          </div>
         </el-form-item>
         <el-form-item v-if="disputeForm.disputeType === 'FALSE_CLAIM'" label="选择物品" required>
           <el-select v-model="disputeForm.itemId" placeholder="选择被冒领的物品" style="width: 100%" filterable>
@@ -83,6 +92,16 @@
               :key="i.id"
               :value="i.id"
               :label="`#${i.id} ${i.title}`"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else-if="disputeForm.disputeType === 'ITEM_NOT_FOUND'" label="认领订单" required>
+          <el-select v-model="disputeForm.applyId" placeholder="选择「已通过、待取件」的认领订单" style="width: 100%">
+            <el-option
+              v-for="a in pendingPickupClaims"
+              :key="a.id"
+              :value="a.id"
+              :label="`#${a.id} ${a.itemTitle || '物品' + a.itemId}（待取件）`"
             />
           </el-select>
         </el-form-item>
@@ -107,12 +126,7 @@
           />
         </el-form-item>
         <el-form-item label="证据图片">
-          <el-input
-            v-model="evidenceInput"
-            placeholder="输入图片 URL（可选），每行一个"
-            type="textarea"
-            :rows="2"
-          />
+          <EvidenceUpload v-model="disputeForm.evidenceImages" :max="6" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -161,6 +175,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { disputeApi, claimApi, foundItemApi } from '@/api'
+import EvidenceUpload from '@/components/EvidenceUpload.vue'
+import ChatDialog from '@/components/ChatDialog.vue'
 import type { DisputeVO, ClaimApply, FoundItem } from '@/types'
 import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP } from '@/types'
 
@@ -171,8 +187,17 @@ const size = ref(10)
 const total = ref(0)
 const submitting = ref(false)
 
-const completedClaims = ref<ClaimApply[]>([])
+const myClaims = ref<ClaimApply[]>([])
+const completedClaims = computed(() => myClaims.value.filter((a) => a.applyStatus === 1))
+const pendingPickupClaims = computed(() => myClaims.value.filter((a) => a.applyStatus === 4))
 const claimedItems = ref<FoundItem[]>([])
+
+const chatVisible = ref(false)
+const chatDisputeId = ref<number | null>(null)
+const openChat = (row: any) => {
+  chatDisputeId.value = row.id
+  chatVisible.value = true
+}
 
 const disputeDialogVisible = ref(false)
 const detailVisible = ref(false)
@@ -182,24 +207,22 @@ const disputeForm = ref({
   disputeType: 'ITEM_MISMATCH',
   applyId: undefined as number | undefined,
   itemId: undefined as number | undefined,
-  description: ''
+  description: '',
+  evidenceImages: [] as string[]
 })
-const evidenceInput = ref('')
 
-const alertText = computed(() =>
-  disputeForm.value.disputeType === 'FALSE_CLAIM'
-    ? '如果你是物品的真正失主，发现物品被他人冒领，可选择物品发起冒领申诉，由管理员审核裁定（无时间限制）'
-    : '仅限认领人在领取后 24 小时内提交，针对已完成领取的订单'
-)
+const alertText = computed(() => {
+  const t = disputeForm.value.disputeType
+  if (t === 'FALSE_CLAIM') {
+    return '如果你是物品的真正失主，发现物品被他人冒领，可选择物品发起冒领申诉，由管理员审核裁定（无时间限制）'
+  }
+  if (t === 'ITEM_NOT_FOUND') {
+    return '仅限「已通过、待取件」的订单：到站货架上没有实物时提交，系统会同时通知投放点负责人核查货架与监控；核查结论由系统管理员定责'
+  }
+  return '仅限认领人在领取后 7 天内提交，针对已完成领取的订单'
+})
 
 const formatTime = (t?: string) => (t ? new Date(t).toLocaleString('zh-CN') : '—')
-
-const parseEvidence = (): string[] => {
-  return evidenceInput.value
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
 
 const loadDisputes = async () => {
   loading.value = true
@@ -217,10 +240,15 @@ const openDisputeDialog = async () => {
     claimApi.listMy({ page: 1, size: 100 }),
     foundItemApi.list({ page: 1, size: 100, itemStatus: 3 })
   ])
-  completedClaims.value = claimRes.data.records.filter((a) => a.applyStatus === 1)
+  myClaims.value = claimRes.data.records
   claimedItems.value = itemRes.data.records
-  disputeForm.value = { disputeType: 'ITEM_MISMATCH', applyId: undefined, itemId: undefined, description: '' }
-  evidenceInput.value = ''
+  disputeForm.value = {
+    disputeType: 'ITEM_MISMATCH',
+    applyId: undefined,
+    itemId: undefined,
+    description: '',
+    evidenceImages: []
+  }
   disputeDialogVisible.value = true
 }
 
@@ -246,7 +274,7 @@ const submitDispute = async () => {
       applyId: form.disputeType === 'FALSE_CLAIM' ? undefined : form.applyId,
       itemId: form.disputeType === 'FALSE_CLAIM' ? form.itemId : undefined,
       description: form.description.trim(),
-      evidenceImages: parseEvidence()
+      evidenceImages: form.evidenceImages
     })
     ElMessage.success('申诉已提交，请等待管理员处理')
     disputeDialogVisible.value = false

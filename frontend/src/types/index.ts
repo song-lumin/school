@@ -9,6 +9,8 @@ export interface User {
   creditScore: number
   status: number
   allowLeaderboard: number
+  /** 误领次数（后端由 MISCLAIM_COUNT 计次流水统计，积分明细里不展示 0 分记录） */
+  misclaimCount?: number
 }
 
 export interface LoginRequest {
@@ -52,6 +54,10 @@ export interface FoundItem {
   description: string
   foundLocation: string
   foundTime: string
+  /** 拾取时间的模糊描述，非空时优先展示 */
+  foundTimeText?: string | null
+  /** 0 精确 / 1 仅日期 / 2 上午 / 3 下午 / 4 傍晚 / 5 晚上 */
+  foundTimePrecision?: number
   images: string[] | null
   claimQuestion?: string
   perishable: number
@@ -60,6 +66,8 @@ export interface FoundItem {
   founderName?: string
   dropPointId: number | null
   dropPointName?: string
+  dropPointAdminName?: string
+  dropPointAdminPhone?: string
   publishedAt: string
   claimedAt: string | null
   newUser?: boolean
@@ -75,6 +83,10 @@ export interface FoundItemRequest {
   foundLocation: string
   dropPointId?: number
   foundTime: string
+  /** 拾取时间模糊描述（选填，≤60 字） */
+  foundTimeText?: string
+  /** 0 精确 / 1 仅日期 / 2 上午 / 3 下午 / 4 傍晚 / 5 晚上 */
+  foundTimePrecision?: number
   images?: string[]
   claimQuestion: string
   referenceAnswer?: string
@@ -97,6 +109,9 @@ export interface DropPoint {
   location: string
   adminId: number | null
   adminName?: string
+  adminPhone?: string
+  adminEmail?: string
+  officeHours?: string
   hasCamera: number
   cameraInfo?: string
   status: number
@@ -108,6 +123,11 @@ export interface ClaimApply {
   sourceNoticeId?: number | null
   itemTitle?: string
   claimQuestion?: string
+  dropPointId?: number
+  dropPointName?: string
+  dropPointLocation?: string
+  dropPointAdminName?: string
+  dropPointAdminPhone?: string
   claimerId: number
   claimerName?: string
   answer: string
@@ -208,9 +228,34 @@ export interface DisputeVO {
   evidenceImages: string[] | null
   status: number
   handlerNote?: string
+  handleResult?: string | null
   handlerId?: number
   handledAt?: string
   createdAt: string
+  /** 站点现场核验陈述（只写事实，不写结论） */
+  pointCheckNote?: string | null
+  pointCheckerId?: number | null
+  pointCheckerName?: string | null
+  pointCheckedAt?: string | null
+  /** 关联投放点 */
+  dropPointId?: number | null
+  dropPointName?: string | null
+  dropPointAdminName?: string | null
+  dropPointAdminPhone?: string | null
+  /** 待处理工单已等待小时数（站点不在岗的兜底依据） */
+  pendingHours?: number | null
+  /** 现场核验是否由系统管理员代填 */
+  pointCheckStandIn?: boolean | null
+  /** 最近一次催办时间（站点超 24h 未回填） */
+  pointEscalatedAt?: string | null
+  /** 已催办次数 */
+  pointRemindCount?: number | null
+  /** 定责时站点仍未回填，1 = 站点未响应 */
+  siteUnresponsive?: number | null
+  /** 站点未响应标记时间 */
+  siteUnresponsiveAt?: string | null
+  /** 已超过 24h SLA 且仍未回填 */
+  pointSlaOverdue?: boolean | null
 }
 
 export interface DisputeCreateRequest {
@@ -223,6 +268,12 @@ export interface DisputeCreateRequest {
 
 export interface DisputeHandleRequest {
   approved: boolean
+  /** 旧版按类型预设结论，前端已不再传 */
+  outcome?: string
+  /** 手动回滚项：PUBLISH_CHECK / PUBLISH_PICKUP / FORWARD / CLAIMER；传数组即走手动定责 */
+  rollbackItems?: string[]
+  /** 物品处置：NONE / VOIDED / LOST / RETURNING / PUBLIC */
+  itemDispose?: string
   handlerNote: string
 }
 
@@ -249,14 +300,17 @@ export interface DashboardVO {
 
 export const DISPUTE_TYPE_MAP: Record<string, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
   ITEM_MISMATCH: { text: '物品不符', type: 'danger' },
+  ITEM_DAMAGED: { text: '物品损坏', type: 'warning' },
+  ITEM_NOT_FOUND: { text: '找不到物品', type: 'info' },
   OTHER: { text: '其他纠纷', type: 'warning' },
   FALSE_CLAIM: { text: '物品被冒领', type: 'primary' }
 }
 
 export const DISPUTE_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
-  0: { text: '待处理', type: 'warning' },
-  1: { text: '已通过', type: 'success' },
-  2: { text: '已驳回', type: 'danger' }
+  0: { text: '未处理', type: 'warning' },
+  1: { text: '已处理 · 通过', type: 'success' },
+  2: { text: '已处理 · 驳回', type: 'danger' },
+  3: { text: '处理中', type: 'primary' }
 }
 
 export interface ReportVO {
@@ -309,7 +363,9 @@ export const ITEM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'suc
   3: { text: '已取件', type: 'primary' },
   4: { text: '已归档', type: 'info' },
   5: { text: '已过期', type: 'info' },
-  6: { text: '待投放未公开', type: 'warning' }
+  6: { text: '待投放未公开', type: 'warning' },
+  7: { text: '待归还', type: 'danger' },
+  8: { text: '丢失待查', type: 'danger' }
 }
 
 export const CLAIM_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
@@ -332,3 +388,24 @@ export const NOTICE_STATUS_MAP: Record<number, { text: string; type: 'info' | 's
 }
 
 export const ITEM_CATEGORIES = ['电子产品', '证件卡类', '钥匙', '书籍资料', '衣物', '饰品', '生活用品', '其他']
+
+export interface SysMessage {
+  id: number
+  userId: number
+  title: string
+  content: string
+  bizType: string | null
+  relatedItemId: number | null
+  relatedApplyId: number | null
+  isRead: number
+  createdAt: string
+}
+
+export const MESSAGE_BIZ_MAP: Record<string, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
+  CREDIT: { text: '积分变动', type: 'warning' },
+  DISPUTE: { text: '申诉处理', type: 'danger' },
+  RETURN: { text: '归还入库', type: 'success' },
+  CLAIM: { text: '认领进展', type: 'primary' },
+  ITEM_NOT_FOUND: { text: '找不到物品', type: 'info' },
+  CHAT: { text: '沟通留言', type: 'warning' }
+}

@@ -44,7 +44,7 @@
         <div style="margin-bottom: 12px">
           <el-button type="primary" @click="openDisputeDialog">发起纠纷申诉</el-button>
           <span style="margin-left: 12px; color: #909399; font-size: 13px">
-            适用于：领取后发现物品不符、物品被冒领、物品在投放点丢失等情况
+            适用于：领取后物品不符、领取后物品损坏、物品被冒领、其他纠纷；现场找不到实物请到「我的认领」点「找不到物品，报站点核查」
           </span>
         </div>
         <el-table :data="myDisputes" stripe>
@@ -69,7 +69,15 @@
           <el-table-column label="提交时间" width="160">
             <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
           </el-table-column>
+          <el-table-column label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="warning" @click="openChat(row)">沟通</el-button>
+            </template>
+          </el-table-column>
         </el-table>
+        <div class="chat-tip-line">
+          对工单处理有疑问（找不到物品、要调监控、催进度）可点「沟通」，直接跟该点位负责人和系统管理员留言。
+        </div>
       </div>
 
       <!-- 被下架申诉 -->
@@ -119,12 +127,19 @@
           <el-col :span="12">
             <el-card shadow="never" class="contact-card">
               <h3 style="margin-top: 0">投放点管理员</h3>
-              <p>负责各投放点的实物清点、保管与积分发放</p>
+              <p>负责各投放点的实物清点、保管与积分发放。到达站点找不到实物、拿不准放哪一层，先打电话给该站点负责人。</p>
               <el-table :data="pointAdmins" size="small" style="margin-top: 8px">
-                <el-table-column prop="name" label="投放点" />
-                <el-table-column prop="location" label="位置" />
-                <el-table-column prop="adminName" label="管理员" />
+                <el-table-column prop="name" label="投放点" min-width="120" />
+                <el-table-column prop="location" label="位置" min-width="110" />
+                <el-table-column prop="adminName" label="负责人" width="90" />
+                <el-table-column label="联系电话" width="130">
+                  <template #default="{ row }">
+                    <span v-if="row.adminPhone" class="phone-link">{{ row.adminPhone }}</span>
+                    <span v-else style="color: #bbb">未登记</span>
+                  </template>
+                </el-table-column>
               </el-table>
+              <p style="color: #909399; font-size: 13px; margin-bottom: 0">办公时间：工作日 9:00-17:00</p>
             </el-card>
           </el-col>
         </el-row>
@@ -132,7 +147,7 @@
           <h3 style="margin-top: 0">反馈渠道说明</h3>
           <ul style="line-height: 1.8; color: #606266">
             <li><b>举报：</b>在招领/启事详情页点击「举报」按钮，选择类型并填写描述</li>
-            <li><b>纠纷申诉：</b>在「我的纠纷申诉」tab 发起，适用于领取后物品不符、被冒领等</li>
+            <li><b>纠纷申诉：</b>在「我的纠纷申诉」tab 发起，适用于领取后物品不符、损坏、被冒领等</li>
             <li><b>下架申诉：</b>在「被下架申诉」tab 对被下架的内容提交申诉</li>
             <li><b>物品丢失：</b>发现物品在投放点丢失，直接在物品详情页提交丢失申诉工单</li>
           </ul>
@@ -140,15 +155,22 @@
       </div>
     </el-card>
 
+    <ChatDialog v-model:visible="chatVisible" :dispute-id="chatDisputeId" title="沟通 · 站点负责人与系统管理员" />
+
     <!-- 纠纷申诉对话框 -->
     <el-dialog v-model="disputeDialogVisible" title="发起纠纷申诉" width="560px">
       <el-form :model="disputeForm" label-width="90px">
         <el-form-item label="申诉类型" required>
           <el-radio-group v-model="disputeForm.disputeType">
-            <el-radio value="ITEM_MISMATCH">物品不符/损坏</el-radio>
-            <el-radio value="FALSE_CLAIM">物品被冒领</el-radio>
+            <el-radio value="ITEM_MISMATCH">物品不符</el-radio>
+            <el-radio value="ITEM_DAMAGED">物品损坏</el-radio>
+              <el-radio value="FALSE_CLAIM">物品被冒领</el-radio>
             <el-radio value="OTHER">其他纠纷</el-radio>
           </el-radio-group>
+          <div style="color: #909399; font-size: 12px; line-height: 1.6; margin-top: 6px">
+            「不符」「损坏」是<b>取走之后</b>才发现的问题：定责后物品转「待归还」，损坏件作废、不再重新公开。
+            现场找不到实物的，请回「我的认领」点「找不到物品，报站点核查」，走投放点现场核查流程。
+          </div>
         </el-form-item>
         <el-form-item v-if="disputeForm.disputeType === 'FALSE_CLAIM'" label="选择物品" required>
           <el-select v-model="disputeForm.itemId" placeholder="选择被冒领的物品" style="width: 100%" filterable>
@@ -163,6 +185,9 @@
         </el-form-item>
         <el-form-item label="申诉描述" required>
           <el-input v-model="disputeForm.description" type="textarea" :rows="4" maxlength="1000" show-word-limit />
+        </el-form-item>
+        <el-form-item label="证据图片">
+          <EvidenceUpload v-model="disputeForm.evidenceImages" :max="6" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -190,9 +215,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { disputeApi, claimApi, foundItemApi, reportApi, moderationApi } from '@/api'
+import ChatDialog from '@/components/ChatDialog.vue'
+import EvidenceUpload from '@/components/EvidenceUpload.vue'
 import type { DisputeVO, ClaimApply, FoundItem } from '@/types'
 import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP } from '@/types'
 
@@ -230,6 +257,13 @@ const loadReports = async () => {
 }
 
 // 纠纷申诉
+const chatVisible = ref(false)
+const chatDisputeId = ref<number | null>(null)
+const openChat = (row: any) => {
+  chatDisputeId.value = row.id
+  chatVisible.value = true
+}
+
 const myDisputes = ref<DisputeVO[]>([])
 const disputesLoading = ref(false)
 const loadDisputes = async () => {
@@ -243,18 +277,19 @@ const loadDisputes = async () => {
 }
 const disputeDialogVisible = ref(false)
 const submitting = ref(false)
-const completedClaims = ref<ClaimApply[]>([])
+const myClaims = ref<ClaimApply[]>([])
+const completedClaims = computed(() => myClaims.value.filter((a) => a.applyStatus === 1))
 const claimedItems = ref<FoundItem[]>([])
-const disputeForm = ref({ disputeType: 'ITEM_MISMATCH', applyId: undefined as number | undefined, itemId: undefined as number | undefined, description: '' })
+const disputeForm = ref({ disputeType: 'ITEM_MISMATCH', applyId: undefined as number | undefined, itemId: undefined as number | undefined, description: '', evidenceImages: [] as string[] })
 
 const openDisputeDialog = async () => {
   const [claimRes, itemRes] = await Promise.all([
     claimApi.listMy({ page: 1, size: 100 }),
     foundItemApi.list({ page: 1, size: 100, itemStatus: 3 })
   ])
-  completedClaims.value = claimRes.data.records.filter((a) => a.applyStatus === 1)
+  myClaims.value = claimRes.data.records
   claimedItems.value = itemRes.data.records
-  disputeForm.value = { disputeType: 'ITEM_MISMATCH', applyId: undefined, itemId: undefined, description: '' }
+  disputeForm.value = { disputeType: 'ITEM_MISMATCH', applyId: undefined, itemId: undefined, description: '', evidenceImages: [] }
   disputeDialogVisible.value = true
 }
 
@@ -270,7 +305,7 @@ const submitDispute = async () => {
       applyId: f.disputeType === 'FALSE_CLAIM' ? undefined : f.applyId,
       itemId: f.disputeType === 'FALSE_CLAIM' ? f.itemId : undefined,
       description: f.description.trim(),
-      evidenceImages: []
+      evidenceImages: f.evidenceImages
     })
     ElMessage.success('申诉已提交')
     disputeDialogVisible.value = false
@@ -323,10 +358,11 @@ const loadContact = async () => {
   try {
     const res = await fetch('/api/drop-points', { headers: { Authorization: 'Bearer ' + localStorage.getItem('token') } })
     const json = await res.json()
-    pointAdmins.value = (json.data || []).map((p: any) => ({
+    pointAdmins.value = (json.data || []).filter((p: any) => p.status !== 0).map((p: any) => ({
       name: p.name,
       location: p.location || p.area || '—',
-      adminName: p.adminName || p.adminRealName || '—'
+      adminName: p.adminName || p.adminRealName || '—',
+      adminPhone: p.adminPhone || p.adminPhoneNumber || ''
     }))
   } catch { /* ignore */ }
 }
@@ -344,6 +380,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.chat-tip-line {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909399;
+}
 .feedback-container { max-width: 1200px; margin: 0 auto; }
 .contact-card { height: 100%; }
+.phone-link { color: #26745c; font-weight: 600; font-variant-numeric: tabular-nums; }
 </style>

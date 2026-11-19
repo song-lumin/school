@@ -13,6 +13,12 @@ public class ClaimApplyVO {
     private Long sourceNoticeId;
     private String itemTitle;
     private String claimQuestion;
+    /** 物品所在投放点及其负责人联系方式，供认领人到站前咨询 */
+    private Long dropPointId;
+    private String dropPointName;
+    private String dropPointLocation;
+    private String dropPointAdminName;
+    private String dropPointAdminPhone;
     private Long claimerId;
     private String claimerName;
     private String answer;

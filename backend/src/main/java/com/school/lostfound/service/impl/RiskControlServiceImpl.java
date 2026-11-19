@@ -32,6 +32,8 @@ public class RiskControlServiceImpl implements RiskControlService {
     private static final int COLLUSION_THRESHOLD = 2;
     /** 认领率预警阈值：发布 >= 3 条且成功领取数为 0 */
     private static final int CLAIM_RATE_MIN_PUBLISHED = 3;
+    /** 误领预警阈值：累计误领（不符/冒领）达到该次数，进入风控关注名单 */
+    private static final int MISCLAIM_WARN_THRESHOLD = 3;
 
     private static final List<String> SENSITIVE_WORDS = List.of(
             "刷分", "刷积分", "转账", "加微信", "加QQ", "私下交易",
@@ -165,12 +167,34 @@ public class RiskControlServiceImpl implements RiskControlService {
         return warnings;
     }
 
+    /**
+     * 高频误领：误领次数此前只记录、不生效，等于形同虚设。
+     * 这里把累计次数拉进风控视野；只预警不自动限制，避免账号被永久锁死（解除需要人工入口）。
+     */
+    public List<RiskWarningVO> detectFrequentMisclaim() {
+        List<User> candidates = userMapper.selectList(new LambdaQueryWrapper<User>()
+                .ge(User::getMisclaimCount, MISCLAIM_WARN_THRESHOLD)
+                .orderByDesc(User::getMisclaimCount));
+
+        return candidates.stream().map(u -> {
+            RiskWarningVO vo = new RiskWarningVO();
+            vo.setWarningType("MISCLAIM_FREQUENT");
+            vo.setUserIds(List.of(u.getId()));
+            vo.setUserNames(List.of(maskName(u.getRealName() != null ? u.getRealName() : u.getUsername())));
+            vo.setCount(u.getMisclaimCount());
+            vo.setDetail("累计误领 " + u.getMisclaimCount() + " 次（物品不符 / 冒领），已达关注阈值 "
+                    + MISCLAIM_WARN_THRESHOLD + " 次；建议核对认领描述准确性，并排查是否存在连带冒领。");
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
     @Override
     public List<RiskWarningVO> getAllWarnings() {
         List<RiskWarningVO> warnings = new ArrayList<>();
         warnings.addAll(detectCollusion());
         warnings.addAll(detectAbnormalClaimRate());
         warnings.addAll(detectDuplicateImages());
+        warnings.addAll(detectFrequentMisclaim());
         return warnings;
     }
 

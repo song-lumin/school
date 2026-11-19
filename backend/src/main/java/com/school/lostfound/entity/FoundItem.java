@@ -23,6 +23,15 @@ public class FoundItem {
 
     private LocalDateTime foundTime;
 
+    /** 拾取时间的模糊描述（如「周三傍晚左右」），选填；有值时优先于精确时间展示 */
+    private String foundTimeText;
+
+    /**
+     * 拾取时间精度：0=精确时刻（历史数据/默认），1=只知道日期，2=上午，3=下午，4=傍晚，5=晚上
+     * 模糊精度下 found_time 只代表作日期，具体时分不对外展示
+     */
+    private Integer foundTimePrecision;
+
     @TableField(typeHandler = JacksonTypeHandler.class)
     private List<String> images;
 

@@ -1,0 +1,11 @@
+DELETE FROM dispute WHERE id = 106;
+DELETE FROM claim_apply WHERE id = 106;
+DELETE FROM credit_log WHERE id >= 166;
+UPDATE found_item SET item_status = 1 WHERE id = 1;
+UPDATE user SET credit_score = 23 WHERE id = 4;
+UPDATE user SET credit_score = 13 WHERE id = 6;
+SELECT MAX(id) AS max_credit FROM credit_log;
+SELECT id, item_status FROM found_item WHERE id = 1;
+SELECT COUNT(*) AS disputes FROM dispute;
+SELECT COUNT(*) AS applies FROM claim_apply;
+SELECT id, credit_score FROM user WHERE id IN (4,6);

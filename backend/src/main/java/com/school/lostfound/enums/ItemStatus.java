@@ -10,7 +10,9 @@ public enum ItemStatus {
     PICKED_UP(3, "已取件"),
     ARCHIVED(4, "已归档"),
     EXPIRED(5, "已过期"),
-    PENDING_PLACEMENT(6, "已发布待投放");
+    PENDING_PLACEMENT(6, "已发布待投放"),
+    RETURNING(7, "待归还"),
+    LOST(8, "丢失待查");
 
     private final int code;
     private final String description;

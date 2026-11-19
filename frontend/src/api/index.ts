@@ -24,7 +24,8 @@ import type {
   ReportVO,
   ReportCreateRequest,
   ReportHandleRequest,
-  CertificateVO
+  CertificateVO,
+  SysMessage
 } from '@/types'
 
 export const authApi = {
@@ -126,6 +127,11 @@ export const dropPointApi = {
 
   getInventory(id: number | string) {
     return request.get<any, ApiResponse<any[]>>(`/drop-points/${id}/inventory`)
+  },
+
+  /** 误领/冒领物品归还入库：待归还(7) → 公开待认领(1)；已定责为损坏的返回 VOIDED 并作废 */
+  returnItemIn(id: number | string, itemId: number | string) {
+    return request.put<any, ApiResponse<string>>(`/drop-points/${id}/items/${itemId}/return-in`)
   }
 }
 
@@ -255,6 +261,21 @@ export const disputeApi = {
 
   handle(id: number | string, data: DisputeHandleRequest) {
     return request.put<any, ApiResponse<void>>(`/disputes/${id}/handle`, data)
+  },
+
+  /** 站点管理员：本点位相关工单（只读事实，不含定责） */
+  listForPoint(params?: { disputeType?: string; status?: number; page?: number; size?: number }) {
+    return request.get<any, ApiResponse<PageResult<DisputeVO>>>('/disputes/point', { params })
+  },
+
+  /** 站点管理员：回填现场核验事实；传 outcome 表示当场给出结论，由系统直接结算积分 */
+  pointCheck(id: number | string, note: string, outcome?: string) {
+    return request.put<any, ApiResponse<void>>(`/disputes/${id}/point-check`, outcome ? { note, outcome } : { note })
+  },
+
+  /** 系统管理员：手动触发站点回填 SLA 催办（定时任务每小时也跑一次） */
+  escalate() {
+    return request.post<any, ApiResponse<number>>('/disputes/escalate')
   }
 }
 
@@ -296,6 +317,10 @@ export interface CameraLog {
 export const cameraLogAdminApi = {
   list(params: { status?: number; dropPointId?: number; itemId?: number; page?: number; size?: number }) {
     return request.get<any, ApiResponse<PageResult<CameraLog>>>('/admin/camera-logs', { params })
+  },
+  /** 站点管理员：本点位相关 / 本人发起的调取申请与审批进度 */
+  mine(params: { status?: number; page?: number; size?: number }) {
+    return request.get<any, ApiResponse<PageResult<CameraLog>>>('/admin/camera-logs/mine', { params })
   },
   create(data: { dropPointId: number; itemId?: number; applyReason: string; timeRangeStart: string; timeRangeEnd: string }) {
     return request.post<any, ApiResponse<CameraLog>>('/admin/camera-logs', data)
@@ -389,5 +414,37 @@ export const dropPointAdminApi = {
 
   delete(id: number | string) {
     return request.delete<any, ApiResponse<void>>(`/drop-points/${id}`)
+  }
+}
+
+export const chatApi = {
+  threads() {
+    return request.get<any, ApiResponse<any[]>>('/chat/threads')
+  },
+
+  list(params: { disputeId?: number | null; itemId?: number | null }) {
+    return request.get<any, ApiResponse<any[]>>('/chat/messages', { params })
+  },
+
+  send(data: { disputeId?: number | null; itemId?: number | null; content: string }) {
+    return request.post<any, ApiResponse<any>>('/chat/messages', data)
+  }
+}
+
+export const messageApi = {
+  list(params?: { page?: number; size?: number }) {
+    return request.get<any, ApiResponse<PageResult<SysMessage>>>('/messages', { params })
+  },
+
+  unreadCount() {
+    return request.get<any, ApiResponse<{ count: number }>>('/messages/unread-count')
+  },
+
+  markRead(id: number | string) {
+    return request.put<any, ApiResponse<void>>(`/messages/${id}/read`)
+  },
+
+  markAllRead() {
+    return request.put<any, ApiResponse<void>>('/messages/read-all')
   }
 }

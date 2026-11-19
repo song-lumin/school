@@ -26,5 +26,8 @@ public interface DropPointService {
 
     void checkItem(Long dropPointId, CheckRequest request, Long operatorId);
 
+    /** 误领/冒领物品归还入库：待归还(7) → 公开待认领(1)；已定责为「物品损坏」的一律作废(0)，返回 "VOIDED" */
+    String returnIn(Long dropPointId, Long itemId, Long operatorId);
+
     List<InventoryItemVO> getInventory(Long dropPointId);
 }

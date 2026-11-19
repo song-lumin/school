@@ -88,6 +88,8 @@ public class ClaimController {
     public Result<Void> cancelPickup(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();
         claimService.cancelPickup(id, userId);
-        return Result.success("已取消认领，其余申请已解锁", null);
+        // 取消有两种结局：实物未离站→解除临时锁定；实物已被站点处理→本次认领终止。
+        // 用中性文案，避免在「终止」场景里错误承诺「其余申请已解锁」
+        return Result.success("已取消认领", null);
     }
 }

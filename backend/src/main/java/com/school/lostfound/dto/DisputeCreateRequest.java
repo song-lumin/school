@@ -9,11 +9,11 @@ import java.util.List;
 @Data
 public class DisputeCreateRequest {
 
-    /** ITEM_MISMATCH / OTHER / FALSE_CLAIM */
+    /** ITEM_MISMATCH（物品不符） / ITEM_DAMAGED（物品损坏） / OTHER / FALSE_CLAIM */
     @NotBlank(message = "工单类型不能为空")
     private String disputeType;
 
-    /** ITEM_MISMATCH / OTHER 时必填 */
+    /** ITEM_MISMATCH / ITEM_DAMAGED / OTHER 时必填 */
     private Long applyId;
 
     /** FALSE_CLAIM（物品被冒领）时必填 */

@@ -95,8 +95,18 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException(400, "无效的状态值");
         }
 
+        boolean wasDisabled = user.getStatus() != null && user.getStatus() == 0;
         user.setStatus(status);
         userMapper.updateById(user);
+
+        // 解封时把负分清零：黑名单是「扣到下限」触发的，解封即重新开始；
+        // 否则解封后只要再被扣 1 分就立刻又进黑名单，等于解封无效
+        int score = user.getCreditScore() == null ? 0 : user.getCreditScore();
+        if (status == 1 && wasDisabled && score < 0
+                && user.getRole() != UserRole.POINT_ADMIN && user.getRole() != UserRole.SYS_ADMIN) {
+            creditService.issueCredit(userId, -score, "ADMIN_RESET", null, null,
+                    "管理员解封：诚信积分清零重新计算", null);
+        }
     }
 
     @Override
@@ -245,8 +255,8 @@ public class AdminServiceImpl implements AdminService {
         int oldScore = user.getCreditScore() != null ? user.getCreditScore() : 0;
         int diff = newScore - oldScore;
         if (diff == 0) return;
-        user.setCreditScore(newScore);
-        userMapper.updateById(user);
+        // 只通过积分流水做一次增量调整：若先把 credit_score 写成目标值再补一条 diff 流水，
+        // 实际分数会变成「目标值 + 差额」，管理员每调一次分都会翻倍
         creditService.issueCredit(userId, diff, "ADMIN_ADJUST", null, null,
                 reason != null ? reason : "管理员调整积分", operatorId);
     }

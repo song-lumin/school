@@ -42,6 +42,9 @@ public class CreditQueryServiceImpl implements CreditQueryService {
     public IPage<CreditLog> listMyLogs(Long userId, int page, int size) {
         LambdaQueryWrapper<CreditLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CreditLog::getUserId, userId)
+                // 误领计次用 0 分的 MISCLAIM_COUNT 流水做幂等凭证：仍留在库内，但不出现在用户积分明细，
+                // 否则用户会在流水里看到一堆「+0」记录，误以为系统在刷分
+                .ne(CreditLog::getOperationType, "MISCLAIM_COUNT")
                 .orderByDesc(CreditLog::getCreatedAt);
         return creditLogMapper.selectPage(new Page<>(page, size), wrapper);
     }

@@ -45,10 +45,19 @@
 
           <dl class="detail-facts">
             <div class="fact"><dt>拾取地点</dt><dd><el-icon><Location /></el-icon>{{ item.foundLocation || '未填写' }}</dd></div>
-            <div class="fact"><dt>拾取时间</dt><dd>{{ formatTime(item.foundTime) }}</dd></div>
+            <div class="fact"><dt>拾取时间</dt><dd>{{ describeFoundTime(item.foundTime, item.foundTimePrecision, item.foundTimeText) }}</dd></div>
             <div class="fact"><dt>发布人</dt><dd>{{ item.founderName || '匿名' }}</dd></div>
             <div class="fact"><dt>发布时间</dt><dd>{{ formatTime(item.publishedAt) }}</dd></div>
-            <div class="fact fact-wide"><dt>存放投放点</dt><dd>{{ item.dropPointName || '未指定' }}</dd></div>
+            <div class="fact fact-wide">
+              <dt>存放投放点</dt>
+              <dd>
+                {{ item.dropPointName || '未指定' }}
+                <span v-if="item.dropPointAdminPhone" class="point-contact">
+                  · {{ item.dropPointAdminName || '负责人' }} {{ item.dropPointAdminPhone }}
+                </span>
+                <small v-if="item.dropPointAdminPhone" class="point-contact-tip">到站前可先电话确认在架</small>
+              </dd>
+            </div>
             <div v-if="item.claimQuestion" class="fact fact-wide"><dt>防伪问题</dt><dd>{{ item.claimQuestion }}</dd></div>
           </dl>
 
@@ -218,6 +227,10 @@
         <el-option label="其他" value="OTHER" />
       </el-select>
       <el-input v-model="reportDesc" type="textarea" :rows="3" placeholder="请描述问题" maxlength="500" show-word-limit />
+      <div style="margin-top: 10px">
+        <div style="font-size: 13px; color: #606266; margin-bottom: 6px">证据图片（可选）</div>
+        <EvidenceUpload v-model="reportEvidence" :max="6" />
+      </div>
       <template #footer>
         <el-button @click="reportDialogVisible = false">取消</el-button>
         <el-button type="danger" :loading="acting" @click="submitReport">提交举报</el-button>
@@ -249,10 +262,12 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { foundItemApi, claimApi, lostNoticeApi, reportApi, moderationApi } from '@/api'
+import EvidenceUpload from '@/components/EvidenceUpload.vue'
 import { useUserStore } from '@/stores/user'
 import { ITEM_STATUS_MAP, CLAIM_STATUS_MAP } from '@/types'
 import type { FoundItem, ClaimApply, LostNotice } from '@/types'
 import { categoryTone } from '@/utils/placeholder'
+import { describeFoundTime } from '@/utils/foundTime'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -280,6 +295,7 @@ const forwardPreview = ref<any>(null)
 const reportDialogVisible = ref(false)
 const reportType = ref('OTHER')
 const reportDesc = ref('')
+const reportEvidence = ref<string[]>([])
 const appealDialogVisible = ref(false)
 const appealReasonText = ref('')
 const adminTakedownDialogVisible = ref(false)
@@ -475,10 +491,16 @@ const submitReport = async () => {
   if (!reportDesc.value.trim()) { ElMessage.warning('请填写举报描述'); return }
   acting.value = true
   try {
-    await reportApi.create({ reportType: reportType.value, itemId: Number(itemId.value), description: reportDesc.value.trim() })
+    await reportApi.create({
+      reportType: reportType.value,
+      itemId: Number(itemId.value),
+      description: reportDesc.value.trim(),
+      evidenceImages: reportEvidence.value
+    })
     ElMessage.success('举报已提交，等待管理员审核')
     reportDialogVisible.value = false
     reportDesc.value = ''
+    reportEvidence.value = []
   } catch (e) { console.error(e) } finally { acting.value = false }
 }
 
@@ -560,6 +582,8 @@ onMounted(() => {
 .fact dt { color: #8a968f; font-size: 12px; }
 .fact dd { display: flex; align-items: center; gap: 5px; margin: 0; color: #2c3933; font-size: 14px; font-weight: 550; }
 .fact dd .el-icon { color: #6f8f7c; }
+.point-contact { color: #26745c; font-weight: 600; font-variant-numeric: tabular-nums; }
+.point-contact-tip { display: block; width: 100%; margin-top: 2px; color: #96a29b; font-size: 11px; font-weight: 400; }
 
 .action-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-top: auto; padding-top: 26px; }
 

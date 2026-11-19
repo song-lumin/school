@@ -75,6 +75,19 @@ public class DropPointController {
         return Result.success("巡检完成，已发放积分", null);
     }
 
+    @PutMapping("/{id}/items/{itemId}/return-in")
+    @PreAuthorize("hasAnyRole('POINT_ADMIN', 'SYS_ADMIN')")
+    public Result<String> returnIn(@PathVariable Long id,
+                                   @PathVariable Long itemId,
+                                   Authentication authentication) {
+        Long userId = (Long) authentication.getPrincipal();
+        String outcome = dropPointService.returnIn(id, itemId, userId);
+        if ("VOIDED".equals(outcome)) {
+            return Result.success("已确认收回：该件已定责为「物品损坏」，已作废归档，不再重新公开", outcome);
+        }
+        return Result.success("已确认归还入库，物品重新公开待认领", outcome);
+    }
+
     @GetMapping("/{id}/inventory")
     @PreAuthorize("hasAnyRole('POINT_ADMIN', 'SYS_ADMIN')")
     public Result<List<InventoryItemVO>> getInventory(@PathVariable Long id) {

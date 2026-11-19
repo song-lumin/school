@@ -27,8 +27,19 @@ public class FoundItemController {
     }
 
     @GetMapping
-    public Result<IPage<FoundItemVO>> list(ItemQueryRequest request) {
-        return Result.success(foundItemService.listPublic(request));
+    public Result<IPage<FoundItemVO>> list(ItemQueryRequest request, Authentication authentication) {
+        // 该接口免登录可访问：未登录（anonymous）时 viewerId 为 null，只能看公开待认领
+        Long viewerId = resolveViewerId(authentication);
+        return Result.success(foundItemService.listPublic(request, viewerId));
+    }
+
+    /** 取出当前登录用户 id；匿名访问或 token 无效时返回 null，不抛异常 */
+    private Long resolveViewerId(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return null;
+        }
+        Object principal = authentication.getPrincipal();
+        return principal instanceof Long id ? id : null;
     }
 
     @GetMapping("/my")
