@@ -64,7 +64,7 @@ public class LostNoticeController {
         return Result.success(lostNoticeService.smartMatch(id, userId));
     }
 
-    /** Sprint2 智能匹配：时间±3天 + 地点相似 + 关键词加权评分 */
+    /** 迭代一 V2.0 智能匹配：时间±3天 + 地点相似 + 关键词加权评分 */
     @GetMapping("/{id}/matches/v2")
     public Result<List<MatchResultVO>> smartMatchV2(@PathVariable Long id, Authentication authentication) {
         Long userId = (Long) authentication.getPrincipal();

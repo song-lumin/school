@@ -211,7 +211,7 @@ public class LostNoticeServiceImpl implements LostNoticeService {
                 .limit(20)
                 .collect(Collectors.toList());
 
-        // 把最高分匹配写回 matched_item_id（Sprint2 字段）
+        // 把最高分匹配写回 matched_item_id（迭代一 V2.0 字段）
         if (!results.isEmpty() && results.get(0).getScore() >= SCORE_KEYWORD) {
             Long bestItemId = results.get(0).getItemId();
             if (!bestItemId.equals(notice.getMatchedItemId())) {

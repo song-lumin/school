@@ -1,8 +1,8 @@
 # 华为 CodeArts 落地配置指南
 
 > 对应《校园失物招领及诚信积分系统-技术设计方案》
-> - 1.2 技术目标：基于华为 CodeArts 平台完成 Scrum 敏捷开发（两轮迭代）
-> - 8. Sprint迭代规划（Sprint1 18任务 / Sprint2 10任务）
+> - 1.2 技术目标：基于华为 CodeArts 平台完成 Scrum 敏捷开发（1 次基础 + 2 轮迭代）
+> - 8. 迭代规划（基础原型 V1.0 11 项 / 迭代一 V2.0 12 项 / 迭代二 V3.0 12 项）
 > - 10.3 华为 CodeArts DevOps 流水线（五阶段）
 > - 12.2 代码交付物：CodeArts 流水线配置
 
@@ -16,7 +16,7 @@
 | `codearts/build-backend.yml` | 后端编译构建任务 | 10.3 build-backend |
 | `codearts/build-frontend.yml` | 前端编译构建任务 | 10.3 build-frontend |
 | `codearts/deploy.sh` | 镜像构建+部署发布脚本 | 10.3 docker-build / deploy |
-| `codearts/workitems.csv` | Scrum 工作项导入（2个迭代+28任务） | 8.1 / 8.2 |
+| `codearts/workitems.csv` | Scrum 工作项导入（3个阶段+35项任务） | 8.1 / 8.2 / 8.3 |
 
 ---
 
@@ -25,12 +25,12 @@
 1. 登录 [华为云 CodeArts 控制台](https://www.huaweicloud.com/product/codearts.html)，区域选 **华南-广州（cn-south-1）**（与技术方案 10.3 的 codehub 地址一致）
 2. 「项目列表 → 新建项目 → Scrum」，项目名：`校园失物招领及诚信积分系统`
 
-## 2. 导入 Scrum 工作项（两轮迭代）
+## 2. 导入 Scrum 工作项（1次基础 + 2轮迭代）
 
-1. 进入项目 → 「工作项 → 迭代」：先手动新建迭代 `Sprint1-MVP核心闭环`、`Sprint2-智能匹配与增强`
+1. 进入项目 → 「工作项 → 迭代」：先手动新建 `V1.0-基础原型-骨架与核心流程`、`V2.0-迭代一-功能完善`、`V3.0-迭代二-增强体验与内容治理`
 2. 「工作项 → 批量导入 → 下载模板」，将 `codearts/workitems.csv` 中的行按模板列名填入后上传
-   - CSV 已含 2 个迭代标题行 + Sprint1 的 18 个任务 + Sprint2 的 10 个任务（ID、描述、优先级均取自技术方案 8.1/8.2）
-3. 导入后在「迭代看板」检查两个迭代的任务归属是否正确
+   - CSV 含 3 个阶段标题行及 35 项任务：V1.0 11 项、V2.0 12 项、V3.0 12 项；任务内容与技术方案第 8 章对应
+3. 导入后在「迭代看板」检查三个阶段的任务归属是否正确
 
 ## 3. 代码托管（CodeHub）
 
@@ -67,7 +67,7 @@ git push -u origin master
 
 也可直接在流水线详情「编辑(YAML)」粘贴 `codearts/pipeline.yml`。
 
-> 阶段3 目标：核心 Service 层覆盖率 ≥50%（Sprint1）→ ≥70%（Sprint2），与技术方案 9.2 一致。
+> 阶段3目标：V2.0 阶段核心 Service 单元测试覆盖率目标 ≥50%；V3.0 阶段补充主要业务流程集成测试。
 
 ## 6. 部署准备
 
