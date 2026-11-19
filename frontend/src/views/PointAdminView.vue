@@ -93,7 +93,7 @@
             type="warning"
             :closable="false"
             style="margin: 12px 0"
-            title="站点只负责核对实物、调监控、联系沟通：把看到的事实写清楚提交，工单即转「处理中」交给系统管理员。积分回滚由系统管理员按你反馈的情况勾选处理，站点不预设结论、不碰积分。"
+            title="站点负责核实物、调监控、联系双方并给出结论；系统管理员只按你的结论执行积分，不重判事实。核不清时只提交事实、转系统管理员。"
           />
           <div class="filter-bar" style="margin-top: 4px">
             <el-select v-model="disputeFilter.type" placeholder="纠纷类型" clearable style="width: 160px" @change="reloadDisputes">
@@ -105,9 +105,10 @@
             </el-select>
             <el-select v-model="disputeFilter.status" placeholder="全部状态" clearable style="width: 180px" @change="reloadDisputes">
               <el-option label="未处理（待我处理）" :value="0" />
-              <el-option label="处理中（等管理员/等证据）" :value="3" />
-              <el-option label="已处理 · 通过" :value="1" />
-              <el-option label="已处理 · 驳回" :value="2" />
+              <el-option label="处理中（等补充核对）" :value="3" />
+              <el-option label="待积分处置（已提交结论）" :value="4" />
+              <el-option label="已结案 · 通过" :value="1" />
+              <el-option label="已结案 · 驳回" :value="2" />
             </el-select>
             <el-button @click="reloadDisputes">刷新</el-button>
             <span class="sub-text" style="margin:0">共 {{ disputeTotal }} 条</span>
@@ -152,13 +153,20 @@
             </el-table-column>
             <el-table-column label="处理状态" width="190">
               <template #default="{ row }">
-                <el-tag v-if="row.status === 1" size="small" type="success">已处理 · 通过</el-tag>
-                <el-tag v-else-if="row.status === 2" size="small" type="danger">已处理 · 驳回</el-tag>
+                <el-tag v-if="row.status === 1" size="small" type="success">已结案 · 通过</el-tag>
+                <el-tag v-else-if="row.status === 2" size="small" type="danger">已结案 · 驳回</el-tag>
+                <el-tag v-else-if="row.status === 4" size="small" type="warning">待积分处置</el-tag>
                 <el-tag v-else-if="row.status === 3" size="small" type="primary">处理中</el-tag>
                 <el-tag v-else size="small" :type="row.pointSlaOverdue ? 'danger' : 'warning'">
                   {{ row.pointSlaOverdue ? '未处理 · 超 24h' : '未处理' }}
                 </el-tag>
-                <div v-if="row.status === 3" class="sub-text">已转系统管理员定责</div>
+                <div v-if="row.status === 3" class="sub-text">等补充核对或系统管理员定责</div>
+                <div v-if="row.status === 4" class="sub-text">
+                  结论：{{ row.siteVerdictText || row.siteVerdict }} · 等系统管理员处置积分
+                </div>
+                <div v-if="row.status === 4 && row.needReview === 1" class="sub-text warn-text">
+                  涉及站点责任/不可抗力，已强制转系统复核
+                </div>
                 <div v-if="!row.pointCheckedAt" class="sub-text">已等待 {{ row.pendingHours ?? 0 }} 小时</div>
                 <div v-if="!row.pointCheckedAt && row.pointRemindCount > 0" class="sub-text warn-text">
                   已被催办 {{ row.pointRemindCount }} 次，请尽快回填
@@ -250,31 +258,58 @@
       </el-tabs>
     </el-card>
 
-    <el-dialog v-model="disputeCheckVisible" title="现场核验（只反馈事实）" width="600px">
+    <el-dialog v-model="disputeCheckVisible" title="现场核对与结论（站点结案）" width="700px">
       <el-alert
         type="info"
         :closable="false"
-        style="margin-bottom: 12px"
-        title="写清你核对到的事实即可：实物在不在架、有无损坏、凭证与监控画面看到什么、联系过谁。提交后工单转「处理中」，积分怎么回滚由系统管理员据此定责。"
+        style="margin-bottom: 10px"
+        title="站点负责核实物、调监控、联系双方并给出结论。提交结论后工单转「待积分处置」，系统管理员只按结论执行积分，不重判事实。"
       />
       <p class="check-tip">
         工单 #{{ currentDispute?.id }} ·
         {{ DISPUTE_TYPE_MAP[currentDispute?.disputeType]?.text || currentDispute?.disputeType }} ·
         {{ currentDispute?.itemTitle || '物品' }}
+        <span v-if="currentDispute?.dropPointName"> · {{ currentDispute.dropPointName }}</span>
       </p>
-      <div class="verdict-title" style="margin-bottom: 6px">现场情况（必填）</div>
+      <div class="verdict-title" style="margin-bottom: 6px">现场核对结论</div>
+      <el-radio-group v-model="disputeVerdict" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+        <el-radio value="" border>暂不定论 · 只提交事实，转系统管理员定责</el-radio>
+        <el-radio
+          v-for="opt in verdictOptions"
+          :key="opt.value"
+          :value="opt.value"
+          :label="opt.label"
+          border
+        />
+      </el-radio-group>
+      <el-alert
+        v-if="selectedVerdict"
+        :type="selectedVerdict.needReview ? 'warning' : 'success'"
+        :closable="false"
+        style="margin-bottom: 10px"
+      >
+        <div>物品去向：{{ selectedVerdict.dispose === 'NONE' && String(selectedVerdict.value).indexOf('DAMAGE') === 0 ? '不收回（物品留在认领人，认领完成、不再重新公开）' : (DISPOSE_LABELS[selectedVerdict.dispose] || selectedVerdict.dispose) }}</div>
+        <div>应回滚积分：{{ selectedVerdictItemsText }}</div>
+        <div v-if="!selectedVerdict.items.length && selectedVerdict.value !== 'REJECT'">
+          该结论不撤回任何已发放积分，只处理物品与责任认定
+        </div>
+        <div v-if="selectedVerdict.extra">附加处罚：{{ selectedVerdict.extra }}</div>
+        <div v-if="selectedVerdict.value === 'REJECT'">申诉不成立：物品状态与积分均不变，本单直接结案</div>
+        <div v-if="selectedVerdict.needReview">涉及站点自身责任或不可抗力，提交后强制转系统复核</div>
+      </el-alert>
+      <div class="verdict-title" style="margin-bottom: 6px">现场情况（必填，至少 20 字）</div>
       <el-input
         v-model="disputeCheckNote"
         type="textarea"
-        :rows="6"
+        :rows="5"
         maxlength="1000"
         show-word-limit
-        placeholder="示例：15:20 到图书馆一层服务台核对，货架 A 区未见该物品，监控显示被他人取走，故认定物品已不在站。"
+        placeholder="写清时间、地点、看到了什么、联系过谁。示例：15:20 到图书馆一层服务台核对，货架 A 区未见该物品；监控 15:05 显示一名男生取走，已电话联系其本人，确认是拿错并愿意送回。"
       />
       <template #footer>
         <el-button @click="disputeCheckVisible = false">取消</el-button>
         <el-button type="primary" :loading="disputeSubmitting" @click="submitDisputeCheck">
-          提交核验（转系统管理员）
+          {{ disputeVerdict ? '提交结论 · 转积分处置' : '仅提交事实 · 转系统管理员' }}
         </el-button>
       </template>
     </el-dialog>
@@ -343,7 +378,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Box } from '@element-plus/icons-vue'
 import { dropPointApi, moderationApi, archiveApi, disputeApi, cameraLogAdminApi } from '@/api'
-import { DISPUTE_TYPE_MAP } from '@/types'
+import { DISPUTE_TYPE_MAP, DISPUTE_VERDICT_OPTIONS, CREDIT_ITEM_LABELS, DISPOSE_LABELS } from '@/types'
 import type { DropPoint } from '@/types'
 import { useUserStore } from '@/stores/user'
 import ChatDialog from '@/components/ChatDialog.vue'
@@ -389,6 +424,7 @@ const disputeLoading = ref(false)
 const disputeCheckVisible = ref(false)
 const disputeSubmitting = ref(false)
 const disputeCheckNote = ref('')
+const disputeVerdict = ref('')
 const currentDispute = ref<any>(null)
 const disputeFilter = ref<{ type?: string; status?: number }>({ status: 0 })
 const disputePage = ref(1)
@@ -448,16 +484,36 @@ const openChat = (row: any) => {
 const openDisputeCheck = (row: any) => {
   currentDispute.value = row
   disputeCheckNote.value = row.pointCheckNote || ''
+  disputeVerdict.value = ''
   disputeCheckVisible.value = true
 }
 
+/** 当前工单类型下允许的结论（后端口径保持一致，选错会被拦） */
+const verdictOptions = computed(() => {
+  const t = currentDispute.value?.disputeType
+  return (t && (DISPUTE_VERDICT_OPTIONS as any)[t]) || []
+})
+const selectedVerdict = computed(() =>
+  verdictOptions.value.find((o: any) => o.value === disputeVerdict.value) || null
+)
+const selectedVerdictItemsText = computed(() => {
+  const opt = selectedVerdict.value
+  if (!opt || !opt.items.length) return '无需回滚'
+  return opt.items.map((i: string) => (CREDIT_ITEM_LABELS as any)[i] || i).join('、')
+})
+
 const submitDisputeCheck = async () => {
   if (!currentDispute.value) return
-  if (!disputeCheckNote.value.trim()) { ElMessage.warning('请填写现场核验情况'); return }
+  const note = disputeCheckNote.value.trim()
+  if (!note) { ElMessage.warning('请填写现场核对情况'); return }
+  if (note.length < 20) { ElMessage.warning('请把时间、地点、看到什么写清，至少 20 字'); return }
+  const verdict = disputeVerdict.value || undefined
   disputeSubmitting.value = true
   try {
-    await disputeApi.pointCheck(currentDispute.value.id, disputeCheckNote.value.trim())
-    ElMessage.success('现场情况已提交，工单转为「处理中」，等系统管理员定责')
+    await disputeApi.pointCheck(currentDispute.value.id, note, verdict)
+    ElMessage.success(verdict
+      ? '结论已提交，工单转为「待积分处置」，系统管理员将据此处理积分'
+      : '现场情况已提交，工单转为「处理中」，等系统管理员定责')
     disputeCheckVisible.value = false
     fetchPointDisputes()
   } catch (e: any) {
@@ -651,7 +707,7 @@ const handleReturnIn = async (row: InventoryRow) => {
   if (!selectedPointId.value) return
   try {
     await ElMessageBox.confirm(
-      `确认「${row.item.title}」实物已收回站点？普通误领件收回后会重新公开待认领；若本单已定责为「物品损坏」，收回后直接作废归档，不会再进入公开池。`,
+      `确认「${row.item.title}」实物已收回站点？普通误领件收回后会重新公开待认领；历史遗留的损坏待归还件收回后直接作废归档，不会再进入公开池。`,
       '确认归还入库',
       { confirmButtonText: '已收回，入库', cancelButtonText: '再等等', type: 'warning' }
     )

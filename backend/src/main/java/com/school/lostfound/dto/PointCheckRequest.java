@@ -5,7 +5,9 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
- * 站点现场核验回填：只描述事实（实物是否在架、损坏部位、交付凭证状态），不写责任结论。
+ * 站点现场核验：站点管理员既回填事实，也可以直接给出结论结案。
+ * 只填 note = 仅回填事实，工单转「处理中」等系统管理员（旧行为，保留兼容）；
+ * 同时填 verdict = 站点结案，工单转「待积分处置」，系统管理员只按结论执行积分。
  */
 @Data
 public class PointCheckRequest {
@@ -15,11 +17,18 @@ public class PointCheckRequest {
     private String note;
 
     /**
-     * 现场结论（可选，选了就等于站点当场结案，系统按规则表自动处理状态与积分）：
-     * 找不到物品：FOUND 实物在站 / NOT_DELIVERED 从未投放 / STOLEN 被他人拿走；
-     * 物品损坏：SITE_FAULT 站点责 / CLAIMER_FAULT 认领人责 / PUBLISHER_FAULT 发布人责；
-     * OTHER：现场无法判定，只回填事实并转系统管理员定责。
+     * 站点结论码（可选）：
+     * 物品不符：MISMATCH_TRUE 误领成立 / REJECT 不成立；
+     * 物品损坏：DAMAGE_CLAIMER 认领人责 / DAMAGE_PUBLISHER 发布人责 /
+     *          DAMAGE_SITE 站点责 / DAMAGE_MAJEURE 不可抗力；
+     * 物品被冒领：FALSE_CLAIM_TRUE 冒领成立 / REJECT 不成立；
+     * 找不到物品：NF_FOUND 实物在站 / NF_NOT_DELIVERED 从未投放 / NF_STOLEN 被他人拿走；
+     * 其他纠纷：OTHER_TRUE 成立 / REJECT 不成立。
      */
+    @Size(max = 30, message = "结论取值过长")
+    private String verdict;
+
+    /** 旧字段，等价于 verdict，保留兼容 */
     @Size(max = 30, message = "结论取值过长")
     private String outcome;
 }

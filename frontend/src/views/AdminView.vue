@@ -155,9 +155,10 @@
           <div style="margin-bottom: 12px">
             <el-select v-model="disputeFilter.status" placeholder="状态" clearable style="width: 140px; margin-right: 12px">
               <el-option label="未处理" :value="0" />
-              <el-option label="处理中（站点已接手）" :value="3" />
-              <el-option label="已处理 · 通过" :value="1" />
-              <el-option label="已处理 · 驳回" :value="2" />
+              <el-option label="处理中（站点核验中）" :value="3" />
+              <el-option label="待积分处置（站点已给结论）" :value="4" />
+              <el-option label="已结案 · 通过" :value="1" />
+              <el-option label="已结案 · 驳回" :value="2" />
             </el-select>
             <el-select v-model="disputeFilter.disputeType" placeholder="类型" clearable style="width: 160px; margin-right: 12px">
               <el-option label="物品不符" value="ITEM_MISMATCH" />
@@ -205,9 +206,13 @@
             </el-table-column>
             <el-table-column label="操作" width="110" fixed="right">
               <template #default="{ row }">
-                <el-button link type="primary" @click="openHandleDialog(row)">处理</el-button>
+                <el-button v-if="row.status === 4" link type="primary" @click="openDisputeCredit(row)">
+                  处置积分
+                </el-button>
+                <el-button v-else link type="primary" @click="openHandleDialog(row)">处理</el-button>
                 <el-button link type="warning" @click="openChat(row)">沟通</el-button>
-                <el-tag v-if="row.status === 3" size="small" type="primary" style="margin-left:6px">待定责</el-tag>
+                <el-tag v-if="row.status === 4" size="small" type="warning" style="margin-left:6px">待处置</el-tag>
+                <el-tag v-else-if="row.status === 3" size="small" type="primary" style="margin-left:6px">待定责</el-tag>
               </template>
             </el-table-column>
           </el-table>
@@ -552,6 +557,88 @@
       </template>
     </el-dialog>
 
+    <!-- 积分处置对话框：站点已给结论，系统只执行积分 -->
+    <el-dialog v-model="disputeCreditVisible" title="积分处置（站点已结案）" width="700px">
+      <el-descriptions v-if="handling" :column="2" border style="margin-bottom: 12px">
+        <el-descriptions-item label="工单号">{{ handling.id }}</el-descriptions-item>
+        <el-descriptions-item label="类型">{{ DISPUTE_TYPE_MAP[handling.disputeType]?.text }}</el-descriptions-item>
+        <el-descriptions-item label="申诉人">{{ handling.applicantName }}</el-descriptions-item>
+        <el-descriptions-item label="关联物品">{{ handling.itemTitle || ('#' + handling.itemId) }}</el-descriptions-item>
+        <el-descriptions-item label="站点结论" :span="2">
+          <el-tag type="success">{{ handling.siteVerdictText || handling.siteVerdict }}</el-tag>
+          <el-tag v-if="handling.needReview === 1" type="danger" style="margin-left: 6px">涉及站点责任/不可抗力 · 需复核</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="站点建议物品处置" :span="2">
+          {{ DISPOSE_LABELS[handling.siteDispose || 'NONE'] || handling.siteDispose }}
+        </el-descriptions-item>
+        <el-descriptions-item label="站点建议回滚" :span="2">
+          {{ handling.siteSuggestItems
+            ? handling.siteSuggestItems.split(',').map(i => CREDIT_ITEM_LABELS[i] || i).join('、')
+            : '无需回滚' }}
+          <div v-if="creditExtraPunish" class="form-hint">附加处罚：{{ creditExtraPunish }}（执行时一并生效）</div>
+        </el-descriptions-item>
+        <el-descriptions-item label="站点现场说明" :span="2">
+          <div class="point-check-note">{{ handling.pointCheckNote || '站点未填写' }}</div>
+          <div class="point-check-meta">
+            {{ handling.pointCheckerName || '站点管理员' }}
+            <span v-if="handling.pointCheckStandIn" class="standin-tag">代填</span>
+            · {{ (handling.pointCheckedAt || '').replace('T', ' ').slice(0, 16) }}
+          </div>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="系统只做积分与处罚：按站点结论执行、或按你的判断调整回滚项、或打回站点补充事实。事实认定归站点，系统不重新判断实物与监控。"
+      />
+
+      <el-form label-width="90px">
+        <el-form-item label="处置方式">
+          <el-radio-group v-model="disputeCreditForm.action" style="display:flex;flex-direction:column;gap:6px">
+            <el-radio value="EXECUTE">全部执行 · 按站点结论自动回滚（推荐）</el-radio>
+            <el-radio value="ADJUST">逐条调整 · 我自己勾选要回滚的分</el-radio>
+            <el-radio value="REJECT">打回站点重判 · 不动积分，退回「处理中」</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <template v-if="disputeCreditForm.action === 'ADJUST'">
+          <el-form-item label="回滚积分">
+            <el-checkbox-group v-model="disputeCreditForm.rollbackItems" class="rollback-group">
+              <el-checkbox value="PUBLISH_CHECK">招领方 · 投放分 +1</el-checkbox>
+              <el-checkbox value="PUBLISH_PICKUP">招领方 · 认领分 +3</el-checkbox>
+              <el-checkbox value="FORWARD">转发方 · 转发分 +1</el-checkbox>
+              <el-checkbox value="CLAIMER">认领方 · 认领分 +1</el-checkbox>
+            </el-checkbox-group>
+            <div class="form-hint">没真实发放过的项系统自动跳过，不会扣成负数。</div>
+          </el-form-item>
+          <el-form-item label="物品处置">
+            <el-select v-model="disputeCreditForm.itemDispose" style="width: 320px">
+              <el-option label="不改动（只处理积分）" value="NONE" />
+              <el-option label="待归还（站点收回，物品完好才重新公开）" value="RETURNING" />
+              <el-option label="作废归档（不再重新公开）" value="VOIDED" />
+              <el-option label="转「丢失待查」" value="LOST" />
+              <el-option label="重新公开（回公开池待认领）" value="PUBLIC" />
+            </el-select>
+          </el-form-item>
+        </template>
+        <el-form-item label="处置说明" required>
+          <el-input
+            v-model="disputeCreditForm.note"
+            type="textarea"
+            :rows="3"
+            maxlength="1000"
+            show-word-limit
+            placeholder="写清为什么这样处置：按站点结论执行，或调整了哪一项、为什么；打回时写明还缺什么事实。"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="disputeCreditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitDisputeCredit">确认处置</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 举报处理对话框 -->
     <el-dialog v-model="reportDialogVisible" title="处理举报" width="620px">
       <el-descriptions v-if="handlingReport" :column="2" border style="margin-bottom: 16px">
@@ -665,7 +752,7 @@ import type {
   DropPoint
 } from '@/types'
 import type { CameraLog } from '@/api'
-import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP, REPORT_TYPE_MAP, REPORT_STATUS_MAP } from '@/types'
+import { DISPUTE_TYPE_MAP, DISPUTE_STATUS_MAP, REPORT_TYPE_MAP, REPORT_STATUS_MAP, CREDIT_ITEM_LABELS, DISPOSE_LABELS, DISPUTE_VERDICT_OPTIONS } from '@/types'
 import ChatDialog from '@/components/ChatDialog.vue'
 
 const activeTab = ref('dashboard')
@@ -898,6 +985,60 @@ const handleForm = ref<{ approved: boolean; rollbackItems: string[]; itemDispose
   { approved: true, rollbackItems: [], itemDispose: 'NONE', handlerNote: '' }
 )
 const submitting = ref(false)
+
+// 积分处置：站点已出结论（status=4）的工单，系统只执行积分
+const disputeCreditVisible = ref(false)
+const disputeCreditForm = ref<{
+  action: 'EXECUTE' | 'ADJUST' | 'REJECT'
+  rollbackItems: string[]
+  itemDispose: string
+  note: string
+}>({ action: 'EXECUTE', rollbackItems: [], itemDispose: 'NONE', note: '' })
+
+/** 结论附带的固定处罚，直接从选项表取，避免前后端口径漂移 */
+const creditExtraPunish = computed(() => {
+  const t = handling.value?.disputeType || ''
+  const v = handling.value?.siteVerdict || ''
+  const opts = (DISPUTE_VERDICT_OPTIONS as any)[t] || []
+  const hit = opts.find((o: any) => o.value === v)
+  return (hit && hit.extra) || ''
+})
+
+const openDisputeCredit = (row: DisputeVO) => {
+  handling.value = row
+  const suggest = (row.siteSuggestItems || '').split(',').filter(Boolean)
+  disputeCreditForm.value = {
+    action: 'EXECUTE',
+    rollbackItems: suggest,
+    itemDispose: row.siteDispose || 'NONE',
+    note: ''
+  }
+  disputeCreditVisible.value = true
+}
+
+const submitDisputeCredit = async () => {
+  if (!handling.value) return
+  if (!disputeCreditForm.value.note.trim()) { ElMessage.warning('请填写处置说明'); return }
+  submitting.value = true
+  try {
+    await disputeApi.applyCredit(handling.value.id, {
+      action: disputeCreditForm.value.action,
+      ...(disputeCreditForm.value.action === 'ADJUST'
+        ? { rollbackItems: disputeCreditForm.value.rollbackItems, itemDispose: disputeCreditForm.value.itemDispose }
+        : {}),
+      note: disputeCreditForm.value.note.trim()
+    })
+    ElMessage.success(disputeCreditForm.value.action === 'REJECT'
+      ? '已打回站点重判，站点负责人会收到通知'
+      : '积分处置已完成，站点与申诉人已收到回执')
+    disputeCreditVisible.value = false
+    await loadAdminDisputes()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '处置失败')
+  } finally {
+    submitting.value = false
+  }
+}
 
 // 站点回填 SLA：手动触发一次催办扫描（定时任务每小时也会跑）
 const escalating = ref(false)

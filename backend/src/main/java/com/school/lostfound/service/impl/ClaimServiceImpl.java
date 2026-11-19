@@ -351,9 +351,18 @@ public class ClaimServiceImpl implements ClaimService {
         LambdaQueryWrapper<ClaimApply> lockedWrapper = new LambdaQueryWrapper<>();
         lockedWrapper.eq(ClaimApply::getItemId, item.getId())
                 .eq(ClaimApply::getApplyStatus, ClaimStatus.LOCKED.getCode());
+        List<ClaimApply> lockedBeforePickup = claimApplyMapper.selectList(lockedWrapper);
         ClaimApply lockedUpdate = new ClaimApply();
         lockedUpdate.setApplyStatus(ClaimStatus.REJECTED.getCode());
         claimApplyMapper.update(lockedUpdate, lockedWrapper);
+
+        // 取件成功即结束排队：每个被作废的人都收到通知，避免申请无声消失
+        for (ClaimApply lockedApply : lockedBeforePickup) {
+            messageService.push(lockedApply.getClaimerId(), "本次认领申请已作废 · 物品已交付他人",
+                    "「" + item.getTitle() + "」已按核对通过的那笔申请完成交付，你此前的排队申请随之作废"
+                            + "（不记驳回次数、不扣诚信分）。如该物品后续重新公开，可再次提交认领。",
+                    "CLAIM", item.getId(), lockedApply.getId());
+        }
 
         Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
         // 发布人拾获奖励按「成交」结算，但同一件物品同时只允许存在一笔未回滚的 +3：
@@ -455,6 +464,14 @@ public class ClaimServiceImpl implements ClaimService {
             voidUpdate.setApplyStatus(ClaimStatus.REJECTED.getCode());
             voidUpdate.setRejectReason("原认领人现场取消，物品已重新公开；本次申请作废，如需认领请重新提交");
             claimApplyMapper.update(voidUpdate, voidWrapper);
+
+            // 每个被作废的排队人都要单独收到通知，否则他只看到「锁定中」突然消失
+            for (ClaimApply voided : voidedApplies) {
+                messageService.push(voided.getClaimerId(), "你的认领申请已作废 · 物品重新公开",
+                        "「" + item.getTitle() + "」的原认领人现场取消，物品已重新回到「公开待认领」。"
+                                + "你此前的排队申请已作废（不记驳回次数、不扣诚信分），如需认领请重新提交。",
+                        "CLAIM", item.getId(), voided.getId());
+            }
         }
 
         // 队列已清空，物品直接退回公开待认领

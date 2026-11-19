@@ -57,7 +57,8 @@
   <h1>校园失物招领及诚信积分系统 · 按角色分泳道流程图</h1>
   <p class="sub">
     横轴是角色，纵轴是时间。每一格只写该角色在系统里真实能做的动作；
-    <b>黄色小标签</b>表示跨角色的交接点。user1 / user2 / user3 都是普通用户（权限完全相同），差别只在这条演示故事线里承担的角色。
+    <b>黄色小标签</b>表示跨角色的交接点。user1 / user2 / user3 都是普通用户（权限完全相同），差别只在这条演示故事线里承担的角色。<br>
+    <b>分工口径：</b>线下事实（核实物、调监控、联系双方、给结论与物品去向）归站点管理员；线上积分与处罚（执行、调整、打回）归系统管理员。
   </p>
 
   <div class="scroll">
@@ -130,7 +131,7 @@
       <div class="stage"><span class="num">8</span><span class="nm">拿错 → 不符</span><span class="sk">物品转待归还</span></div>
       <div class="cell b1"><span class="dash">—</span></div>
       <div class="cell b2"><span class="dash">—</span></div>
-      <div class="cell b3"><span class="bad">取消认领「不是我的」</span><br><span class="m">物品转「待归还」；此前被锁的其他申请自动解锁，真正失主可继续认领</span></div>
+      <div class="cell b3"><span class="bad">取消认领「不是我的」</span><br><span class="m">物品转「待归还」；其余排队锁定申请一律作废（逐条站内信，需重新提交），答错满 3 次者保持锁定</span></div>
       <div class="cell b4"><span class="t">收到待归还提醒</span><br><span class="m">在站清单标红，等实物回站</span></div>
       <div class="cell b5"><span class="dash">—</span><br><span class="m">若已产生积分争议再介入</span></div>
 
@@ -146,25 +147,33 @@
       <div class="stage"><span class="num">10</span><span class="nm">异常 A：找不到物品</span><span class="sk">线下找物 + 调监控</span></div>
       <div class="cell b1"><span class="dash">—</span></div>
       <div class="cell b2"><span class="dash">—</span></div>
-      <div class="cell b3"><span class="t">提交「找不到物品」工单</span><br><span class="m">附现场照片等证据；系统立即通知该物品的站点负责人</span></div>
-      <div class="cell b4"><span class="ok">拿到工单 → 找物 → 调监控 → 回填事实</span><br><span class="m">消息里有申诉人电话；点「调监控」发起调取申请；核实后在「纠纷核验」写事实（不写结论）</span><span class="hand">↓ 事实回填</span></div>
-      <div class="cell b5"><span class="t">审批监控调取并留痕</span><br><span class="m">「监控调取」列表批准/拒绝，写明调取范围与结果</span></div>
+      <div class="cell b3"><span class="t">提交「找不到物品」工单</span><br><span class="m">附现场照片等证据；系统立即通知该点位负责人，并写清自己几点到站、卡在哪一步</span></div>
+      <div class="cell b4"><span class="ok">接单 → 找物 → 调监控 → 联系双方 → 给结论</span><br><span class="m">消息里带申诉人电话；「调监控」发起申请；核完在「现场核对与结论」里按类型选结论，并把时间/地点/看到什么写清（≥20 字）</span><span class="hand">↓ 结论 + 物品去向</span></div>
+      <div class="cell b5"><span class="t">批监控、看进展</span><br><span class="m">「监控调取」批准/拒绝并留痕；站内信收到站点结论后才进入积分环节，不替站点判断实物</span></div>
 
       <!-- 11 -->
-      <div class="stage"><span class="num">11</span><span class="nm">定责：三选一</span><span class="sk">积分与状态</span></div>
-      <div class="cell b1"><span class="dash">—</span><br><span class="m">可能被牵连（虚假投放）</span></div>
-      <div class="cell b2"><span class="dash">—</span></div>
-      <div class="cell b3"><span class="t">收到结论通知</span><br><span class="m">在站则重新取件；从未投放则免责</span></div>
-      <div class="cell b4"><span class="t">按结论执行线下动作</span><br><span class="m">交件 / 归档 / 上报丢失待查</span><span class="hand">↑ 依据定责</span></div>
-      <div class="cell b5"><span class="t">出结论并改数据</span><br><span class="m">FOUND 在站误报｜NOT_DELIVERED 从未投放 → 作废+回滚+扣 2 分｜STOLEN 被拿走 → 丢失待查，发布人无责</span></div>
+      <div class="stage"><span class="num">11</span><span class="nm">站点结案 → 待积分处置</span><span class="sk">两段处理</span></div>
+      <div class="cell b1"><span class="t">看结果</span><br><span class="m">判「从未实际投放」时：+1／+3 回滚、扣 2 分、可封号</span></div>
+      <div class="cell b2"><span class="dash">—</span><br><span class="m">物品作废后可重发丢失启事</span></div>
+      <div class="cell b3"><span class="t">收到「站点已完成核对」</span><br><span class="m">在站 → 继续正常取件；从未投放 → 免责；被拿走 → 等排查</span></div>
+      <div class="cell b4"><span class="ok">四选一结论，工单转「待积分处置」</span><br><span class="m">实物在站(误报)｜从未投放(虚假招领)｜被他人拿走｜申诉不成立（直接结案、不动积分）</span><span class="hand">↓ 结论+物品去向+建议回滚项</span></div>
+      <div class="cell b5"><span class="t">看处置单，只做积分</span><br><span class="m">三种动作：全部执行（按结论）／逐条调整（自己勾回滚项+物品处置）／打回重判（退「处理中」）</span><span class="hand">↓ 执行结果 + 回执</span></div>
 
       <!-- 12 -->
       <div class="stage"><span class="num">12</span><span class="nm">异常 B：不符 / 损坏</span><span class="sk">现场核验 → 定责</span></div>
       <div class="cell b1"><span class="dash">—</span></div>
       <div class="cell b2"><span class="dash">—</span></div>
       <div class="cell b3"><span class="t">提「物品不符」或「物品损坏」</span><br><span class="m">拍损坏部位、附证据图</span></div>
-      <div class="cell b4"><span class="ok">现场核验并回填</span><br><span class="m">损坏位置与程度、交付凭证是否齐全、画面时间点——只写看到的事实</span><span class="hand">↓ 事实</span></div>
-      <div class="cell b5"><span class="t">据事实定责</span><br><span class="m">不符 / 损坏分别出结论，决定积分是否回滚；损坏物品不再回公开池</span></div>
+      <div class="cell b4"><span class="ok">现场核验 + 分责任</span><br><span class="m">不符 → 误领成立；损坏 → 认领人／发布人／站点／不可抗力 四选一；站点自己责任必须打「转系统复核」</span><span class="hand">↓ 结论</span></div>
+      <div class="cell b5"><span class="t">按结论执行积分与物品去向</span><br><span class="m">不重判事实，只执行/调整/打回；损坏件不收回 —— 物品留在认领人，状态保持「已领取」，只按责任方回滚与扣分</span></div>
+
+      <!-- 12b -->
+      <div class="stage"><span class="num">12b</span><span class="nm">三次反馈</span><span class="sk">谁收到什么</span></div>
+      <div class="cell b1"><span class="t">被回滚时收到明细</span><br><span class="m">写明撤回的是「投放分 +1」还是「认领分 +3」，以及依据</span></div>
+      <div class="cell b2"><span class="t">收到最终结论</span><br><span class="m">结论一句话 + 物品现在在哪 + 我要做什么</span></div>
+      <div class="cell b3"><span class="t">同一工单三次通知</span><br><span class="m">①站点已完成核对 ②系统处置结果 ③已结案；驳回则明确「物品与积分均未变化」</span></div>
+      <div class="cell b4"><span class="t">收到系统回执</span><br><span class="m">实际回滚了哪几项、哪些未执行、为什么；被打回时写明缺什么事实</span></div>
+      <div class="cell b5"><span class="t">回执落库留痕</span><br><span class="m">credit_actual_items + 处置人 + 时间；工单三方都可在「沟通」里追加说明</span></div>
 
       <!-- 13 -->
       <div class="stage"><span class="num">13</span><span class="nm">举报与申诉</span><span class="sk">第三方介入</span></div>
@@ -203,8 +212,8 @@
     </div>
     <div class="note">
       <b>三条硬规则：</b>① 认领审核可由发布人 / 本点位站点 / 系统管理员任一方完成，但取件确认只能认领人本人点；
-      ② 站点只能看、只能写自己点位的工单与物品，读不了用户库、积分调整、定责接口；
-      ③ 站点回填的是<b>事实</b>，定责与积分只能由系统管理员出，且定责人不得是自己点位负责人（回避）。
+      ② 事实认定归站点（核实物、调监控、联系双方、给结论与物品去向），积分与处罚归系统（只执行/调整/打回，不重判事实）；
+      ③ 站点不得判自己责任：结论涉及<b>站点责任 / 不可抗力 / 封号</b>时自动标「需系统复核」，必须由系统管理员处置。
     </div>
   </div>
 </div>

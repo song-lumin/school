@@ -256,6 +256,22 @@ export interface DisputeVO {
   siteUnresponsiveAt?: string | null
   /** 已超过 24h SLA 且仍未回填 */
   pointSlaOverdue?: boolean | null
+  /** 站点结案结论码 */
+  siteVerdict?: string | null
+  /** 站点结论中文说明 */
+  siteVerdictText?: string | null
+  /** 站点建议的物品处置 */
+  siteDispose?: string | null
+  /** 按结论推导的应回滚项（逗号分隔） */
+  siteSuggestItems?: string | null
+  /** 1 = 涉及站点责任/不可抗力，需系统复核 */
+  needReview?: number | null
+  /** 站点提交结论时间 */
+  siteResolvedAt?: string | null
+  /** 系统实际执行的回滚项 */
+  creditActualItems?: string | null
+  creditHandlerId?: number | null
+  creditHandledAt?: string | null
 }
 
 export interface DisputeCreateRequest {
@@ -308,9 +324,69 @@ export const DISPUTE_TYPE_MAP: Record<string, { text: string; type: 'info' | 'su
 
 export const DISPUTE_STATUS_MAP: Record<number, { text: string; type: 'info' | 'success' | 'warning' | 'danger' | 'primary' }> = {
   0: { text: '未处理', type: 'warning' },
-  1: { text: '已处理 · 通过', type: 'success' },
-  2: { text: '已处理 · 驳回', type: 'danger' },
-  3: { text: '处理中', type: 'primary' }
+  1: { text: '已结案 · 通过', type: 'success' },
+  2: { text: '已结案 · 驳回', type: 'danger' },
+  3: { text: '处理中（等站点出结论）', type: 'primary' },
+  4: { text: '待积分处置', type: 'warning' }
+}
+
+/** 站点可选结案结论：按纠纷类型锁定，避免出现「不符却选作废」这类矛盾组合 */
+export interface DisputeVerdictOption {
+  value: string
+  label: string
+  /** 物品去向：NONE 不动 / RETURNING 待归还 / VOIDED 作废归档 / LOST 丢失待查 */
+  dispose: 'NONE' | 'RETURNING' | 'VOIDED' | 'LOST'
+  /** 按该结论应回滚的积分项，仅用于提示与核对 */
+  items: string[]
+  /** 涉及站点自身责任或不可抗力，必须转系统复核 */
+  needReview?: boolean
+  /** 结论附带的固定处罚（不进回滚项，但要写进处置单） */
+  extra?: string
+}
+
+export const DISPUTE_VERDICT_OPTIONS: Record<string, DisputeVerdictOption[]> = {
+  ITEM_MISMATCH: [
+    { value: 'MISMATCH_TRUE', label: '误领成立（认领人拿错了别人的物品）', dispose: 'RETURNING', items: ['CLAIMER', 'FORWARD', 'PUBLISH_PICKUP'] },
+    { value: 'REJECT', label: '申诉不成立（物品与描述一致）', dispose: 'NONE', items: [] }
+  ],
+  ITEM_DAMAGED: [
+    { value: 'DAMAGE_CLAIMER', label: '损坏 · 认领人责任（取件后使用/搬运不当）', dispose: 'NONE', items: ['CLAIMER'] },
+    { value: 'DAMAGE_PUBLISHER', label: '损坏 · 发布人责任（隐瞒破损或描述严重失实）', dispose: 'NONE', items: [], extra: '另按规则扣发布人 2 分' },
+    { value: 'DAMAGE_SITE', label: '损坏 · 站点责任（保管或流转中损坏，需系统复核）', dispose: 'NONE', items: [], needReview: true },
+    { value: 'DAMAGE_MAJEURE', label: '损坏 · 不可抗力（需系统复核）', dispose: 'NONE', items: [], needReview: true },
+    { value: 'REJECT', label: '申诉不成立（物品完好）', dispose: 'NONE', items: [] }
+  ],
+  ITEM_NOT_FOUND: [
+    { value: 'NF_FOUND', label: '实物还在站里（误报，继续正常取件）', dispose: 'NONE', items: [] },
+    { value: 'NF_NOT_DELIVERED', label: '从未实际投放（虚假招领）', dispose: 'VOIDED', items: ['PUBLISH_CHECK'], extra: '另按规则扣发布人 2 分' },
+    { value: 'NF_STOLEN', label: '实物已被他人拿走', dispose: 'LOST', items: [] },
+    { value: 'REJECT', label: '申诉不成立（实物已在当时交付）', dispose: 'NONE', items: [] }
+  ],
+  FALSE_CLAIM: [
+    { value: 'FALSE_CLAIM_TRUE', label: '冒领成立（领取人并非失主）', dispose: 'RETURNING', items: ['CLAIMER', 'FORWARD', 'PUBLISH_PICKUP'], extra: '另按规则扣认领人 5 分、计 1 次误领' },
+    { value: 'REJECT', label: '申诉不成立（核验一致，确为失主）', dispose: 'NONE', items: [] }
+  ],
+  OTHER: [
+    { value: 'OTHER_TRUE', label: '其他纠纷成立（物品需作废归档）', dispose: 'VOIDED', items: ['CLAIMER', 'FORWARD', 'PUBLISH_CHECK', 'PUBLISH_PICKUP'] },
+    { value: 'REJECT', label: '申诉不成立', dispose: 'NONE', items: [] }
+  ]
+}
+
+/** 积分回滚项的中文标签，与后端 CLAIMER/FORWARD/PUBLISH_CHECK/PUBLISH_PICKUP 对齐 */
+export const CREDIT_ITEM_LABELS: Record<string, string> = {
+  CLAIMER: '认领方·认领分 +1',
+  FORWARD: '转发方·转发分 +1',
+  PUBLISH_CHECK: '招领方·投放分 +1',
+  PUBLISH_PICKUP: '招领方·认领分 +3'
+}
+
+/** 物品处置中文 */
+export const DISPOSE_LABELS: Record<string, string> = {
+  NONE: '不动（保持当前状态）',
+  RETURNING: '待归还（物品收回站点）',
+  VOIDED: '作废归档（不再公开）',
+  LOST: '丢失待查',
+  PUBLIC: '重新公开'
 }
 
 export interface ReportVO {

@@ -54,6 +54,22 @@ public class DisputeVO {
     /** 是否已超过站点回填 SLA（24h）且仍未回填 */
     private Boolean pointSlaOverdue;
 
+    /** 站点结案结论码 */
+    private String siteVerdict;
+    /** 站点结论的中文说明 */
+    private String siteVerdictText;
+    /** 站点建议的物品处置 */
+    private String siteDispose;
+    /** 按结论推导的应回滚项 */
+    private String siteSuggestItems;
+    /** 需系统复核 */
+    private Integer needReview;
+    private LocalDateTime siteResolvedAt;
+    /** 系统实际执行的回滚项 */
+    private String creditActualItems;
+    private Long creditHandlerId;
+    private LocalDateTime creditHandledAt;
+
     public static DisputeVO fromEntity(Dispute d, String applicantName, String itemTitle) {
         DisputeVO vo = new DisputeVO();
         vo.setId(d.getId());
@@ -78,6 +94,14 @@ public class DisputeVO {
         vo.setPointRemindCount(d.getPointRemindCount());
         vo.setSiteUnresponsive(d.getSiteUnresponsive());
         vo.setSiteUnresponsiveAt(d.getSiteUnresponsiveAt());
+        vo.setSiteVerdict(d.getSiteVerdict());
+        vo.setSiteDispose(d.getSiteDispose());
+        vo.setSiteSuggestItems(d.getSiteSuggestItems());
+        vo.setNeedReview(d.getNeedReview());
+        vo.setSiteResolvedAt(d.getSiteResolvedAt());
+        vo.setCreditActualItems(d.getCreditActualItems());
+        vo.setCreditHandlerId(d.getCreditHandlerId());
+        vo.setCreditHandledAt(d.getCreditHandledAt());
         return vo;
     }
 }

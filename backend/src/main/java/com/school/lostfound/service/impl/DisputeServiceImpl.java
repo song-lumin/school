@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.school.lostfound.dto.DisputeCreateRequest;
+import com.school.lostfound.dto.DisputeCreditApplyRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
 import com.school.lostfound.dto.PointCheckRequest;
 import com.school.lostfound.entity.ClaimApply;
@@ -72,6 +73,21 @@ public class DisputeServiceImpl implements DisputeService {
     private static final int STATUS_REJECTED = 2;
     /** 处理中：站点已接手、已回填，但还没出最终结论（例如选了「其他」转管理员，或等监控回放） */
     private static final int STATUS_PROCESSING = 3;
+    /** 待积分处置：站点已给结论，等系统管理员执行积分（系统只做积分，不重判事实） */
+    private static final int STATUS_CREDIT_PENDING = 4;
+
+    /** 站点结论码 */
+    public static final String VERDICT_MISMATCH_TRUE = "MISMATCH_TRUE";
+    public static final String VERDICT_FALSE_CLAIM_TRUE = "FALSE_CLAIM_TRUE";
+    public static final String VERDICT_OTHER_TRUE = "OTHER_TRUE";
+    public static final String VERDICT_DAMAGE_CLAIMER = "DAMAGE_CLAIMER";
+    public static final String VERDICT_DAMAGE_PUBLISHER = "DAMAGE_PUBLISHER";
+    public static final String VERDICT_DAMAGE_SITE = "DAMAGE_SITE";
+    public static final String VERDICT_DAMAGE_MAJEURE = "DAMAGE_MAJEURE";
+    public static final String VERDICT_NF_FOUND = "NF_FOUND";
+    public static final String VERDICT_NF_NOT_DELIVERED = "NF_NOT_DELIVERED";
+    public static final String VERDICT_NF_STOLEN = "NF_STOLEN";
+    public static final String VERDICT_REJECT = "REJECT";
 
     private static final Duration DISPUTE_SUBMIT_WINDOW = Duration.ofDays(7);
 
@@ -434,8 +450,11 @@ public class DisputeServiceImpl implements DisputeService {
     @Transactional
     public void pointCheck(Long id, PointCheckRequest request, Long operatorId) {
         Dispute dispute = getDisputeOrThrow(id);
-        if (!dispute.getStatus().equals(STATUS_PENDING) && !dispute.getStatus().equals(STATUS_PROCESSING)) {
+        if (dispute.getStatus() == STATUS_APPROVED || dispute.getStatus() == STATUS_REJECTED) {
             throw new BusinessException(409, "该工单已处理完毕，无需再处理");
+        }
+        if (dispute.getStatus() == STATUS_CREDIT_PENDING) {
+            throw new BusinessException(409, "站点结论已提交，等系统管理员执行积分，无需再次提交");
         }
         if (dispute.getItemId() == null) {
             throw new BusinessException(409, "该工单未关联物品，无法做站点核验");
@@ -454,17 +473,91 @@ public class DisputeServiceImpl implements DisputeService {
                 && operator.getRole() == com.school.lostfound.enums.UserRole.SYS_ADMIN;
         boolean isPointOwner = point.getAdminId() != null && point.getAdminId().equals(operatorId);
         if (!isSysAdmin && !isPointOwner) {
-            throw new BusinessException(403, "只有该物品所属投放点的负责人（或系统管理员代填）可以回填现场核验");
+            throw new BusinessException(403, "只有该物品所属投放点的负责人（或系统管理员代填）可以处理该工单");
         }
+
+        String verdict = normalizeVerdict(request.getVerdict() != null && !request.getVerdict().isBlank()
+                ? request.getVerdict() : request.getOutcome());
 
         dispute.setPointCheckNote(request.getNote().trim());
         dispute.setPointCheckerId(operatorId);
         dispute.setPointCheckedAt(LocalDateTime.now());
+
+        // 只填事实、不给结论：保持旧行为，转「处理中」等系统管理员定责
+        if (verdict == null) {
+            dispute.setStatus(STATUS_PROCESSING);
+            disputeMapper.updateById(dispute);
+            notifyPointCheckDone(dispute, point, operator, isPointOwner);
+            for (User admin : userMapper.selectList(null)) {
+                if (admin.getRole() == com.school.lostfound.enums.UserRole.SYS_ADMIN) {
+                    messageService.push(admin.getId(), "站点已反馈现场情况，请定责（工单#" + dispute.getId() + "）",
+                            "「" + point.getName() + "」已完成核对（状态：处理中）：" + dispute.getPointCheckNote()
+                                    + "。请到「纠纷管理」勾选要回滚的积分项、填写定责原因。",
+                            "DISPUTE", dispute.getItemId(), dispute.getApplyId());
+                }
+            }
+            log.info("现场核验回填（只报事实）：disputeId={}, pointId={}, checker={}",
+                    dispute.getId(), point.getId(), operatorId);
+            return;
+        }
+
+        assertVerdictAllowed(dispute.getDisputeType(), verdict);
+        if (!VERDICT_REJECT.equals(verdict) && dispute.getApplyId() == null) {
+            throw new BusinessException(400, "该工单没有关联认领申请，结论无法落到积分，请先补充关联");
+        }
+
+        dispute.setSiteVerdict(verdict);
+        dispute.setSiteDispose(siteDisposeOf(dispute.getDisputeType(), verdict));
+        dispute.setSiteSuggestItems(String.join(",", siteSuggestItemsOf(dispute.getDisputeType(), verdict)));
+        dispute.setNeedReview(needReviewOf(verdict) ? 1 : 0);
+        dispute.setSiteResolvedAt(LocalDateTime.now());
+
+        // 申诉不成立：站点可直接结案，不进积分队列，不动物品与积分
+        if (VERDICT_REJECT.equals(verdict)) {
+            dispute.setStatus(STATUS_REJECTED);
+            dispute.setHandlerNote("站点结论：申诉不成立。" + dispute.getPointCheckNote());
+            dispute.setHandlerId(operatorId);
+            dispute.setHandledAt(LocalDateTime.now());
+            disputeMapper.updateById(dispute);
+            messageService.push(dispute.getApplicantId(), "申诉未通过 · 站点已结案（工单#" + dispute.getId() + "）",
+                    "「" + point.getName() + "」核对后认为该申诉不成立：" + dispute.getPointCheckNote()
+                            + "。物品状态与积分均未发生任何变化。如你有新证据，可在工单下补充说明或重新提交。",
+                    "DISPUTE", dispute.getItemId(), dispute.getApplyId());
+            log.info("站点直接驳回：disputeId={}, pointId={}, checker={}",
+                    dispute.getId(), point.getId(), operatorId);
+            return;
+        }
+
+        dispute.setStatus(STATUS_CREDIT_PENDING);
         disputeMapper.updateById(dispute);
 
-        // 站点只负责核对、调监控、联系沟通：这里只落事实，不预设结论、不碰积分，
-        // 由系统管理员在「纠纷管理」里勾选要回滚哪几笔已发放的分并填写原因。
+        // 给系统管理员一张结构化处置单：结论 + 物品建议处置 + 应回滚项 + 现场事实
+        String suggest = dispute.getSiteSuggestItems();
+        String verdictText = verdictText(verdict);
+        for (User admin : userMapper.selectList(null)) {
+            if (admin.getRole() == com.school.lostfound.enums.UserRole.SYS_ADMIN) {
+                messageService.push(admin.getId(), "站点已定结论，待处置积分（工单#" + dispute.getId() + "）",
+                        "站点「" + point.getName() + "」结论：" + verdictText
+                                + "。物品建议处置：" + disposeText(dispute.getSiteDispose())
+                                + "。应回滚项：" + (suggest == null || suggest.isBlank() ? "无" : suggest)
+                                + punishTextOf(verdict)
+                                + "。现场情况：" + trimDot(dispute.getPointCheckNote())
+                                + "。请到「纠纷管理 → 待积分处置」执行或调整。",
+                        "DISPUTE", dispute.getItemId(), dispute.getApplyId());
+            }
+        }
 
+        messageService.push(dispute.getApplicantId(), "站点已完成核对（工单#" + dispute.getId() + "）",
+                "「" + point.getName() + "」核对结论：" + verdictText
+                        + "。系统管理员正在按该结论核算积分，处理完成后会再通知你最终结果与下一步操作。",
+                "DISPUTE", dispute.getItemId(), dispute.getApplyId());
+
+        log.info("站点结案提交：disputeId={}, pointId={}, verdict={}, dispose={}, needReview={}",
+                dispute.getId(), point.getId(), verdict, dispute.getSiteDispose(), dispute.getNeedReview());
+    }
+
+    /** 只回填事实时的原通知路径（保留原有文案与「系统代填」提醒） */
+    private void notifyPointCheckDone(Dispute dispute, DropPoint point, User operator, boolean isPointOwner) {
         if (isPointOwner) {
             messageService.push(dispute.getApplicantId(), "站点已完成现场核验（工单#" + dispute.getId() + "）",
                     "「" + point.getName() + "」负责人已提交现场核验情况：" + dispute.getPointCheckNote()
@@ -484,21 +577,6 @@ public class DisputeServiceImpl implements DisputeService {
                         "DISPUTE", dispute.getItemId(), dispute.getApplyId());
             }
         }
-
-        // 站点反馈到位即转「处理中」，并明确喊系统管理员来定责（积分由管理员勾选回滚）
-        dispute.setStatus(STATUS_PROCESSING);
-        disputeMapper.updateById(dispute);
-        for (User admin : userMapper.selectList(null)) {
-            if (admin.getRole() == com.school.lostfound.enums.UserRole.SYS_ADMIN) {
-                messageService.push(admin.getId(), "站点已反馈现场情况，请定责（工单#" + dispute.getId() + "）",
-                        "「" + point.getName() + "」已完成核对（状态：处理中）：" + dispute.getPointCheckNote()
-                                + "。请到「纠纷管理」勾选要回滚的积分项、填写定责原因。",
-                        "DISPUTE", dispute.getItemId(), dispute.getApplyId());
-            }
-        }
-
-        log.info("现场核验回填：disputeId={}, pointId={}, checker={}, standIn={}",
-                dispute.getId(), point.getId(), operatorId, !isPointOwner);
     }
 
     /**
@@ -656,7 +734,8 @@ public class DisputeServiceImpl implements DisputeService {
      */
     private void handleInternal(Long id, DisputeHandleRequest request, Long operatorId, boolean fromSiteCheck) {
         Dispute dispute = getDisputeOrThrow(id);
-        if (!dispute.getStatus().equals(STATUS_PENDING) && !dispute.getStatus().equals(STATUS_PROCESSING)) {
+        if (!dispute.getStatus().equals(STATUS_PENDING) && !dispute.getStatus().equals(STATUS_PROCESSING)
+                && !dispute.getStatus().equals(STATUS_CREDIT_PENDING)) {
             throw new BusinessException(409, "该工单已处理，请勿重复操作");
         }
         if (!fromSiteCheck) {
@@ -700,6 +779,259 @@ public class DisputeServiceImpl implements DisputeService {
         notifyPointAdminResult(dispute, request.getApproved());
         // 结论也必须回到申诉人本人：之前只有站点收到，申诉人被驳回还是通过都不知情
         notifyApplicantResult(dispute, request.getApproved());
+    }
+
+    @Override
+    @Transactional
+    public void applyCredit(Long id, DisputeCreditApplyRequest request, Long operatorId) {
+        Dispute dispute = getDisputeOrThrow(id);
+        User operator = userMapper.selectById(operatorId);
+        if (operator == null || operator.getRole() != com.school.lostfound.enums.UserRole.SYS_ADMIN) {
+            throw new BusinessException(403, "只有系统管理员可以执行积分处置");
+        }
+        if (dispute.getStatus() == null || dispute.getStatus() != STATUS_CREDIT_PENDING) {
+            throw new BusinessException(409, "该工单不在「待积分处置」状态，无法执行");
+        }
+        String action = request.getAction() == null ? "" : request.getAction().trim().toUpperCase();
+
+        // 打回：系统认为事实还需站点补充，退回「处理中」，不动积分不掉状态
+        if ("REJECT".equals(action)) {
+            dispute.setStatus(STATUS_PROCESSING);
+            dispute.setHandlerNote("系统打回站点重判：" + request.getNote());
+            disputeMapper.updateById(dispute);
+            notifyPointRejected(dispute, request.getNote());
+            log.info("积分处置被打回：disputeId={}, operator={}", id, operatorId);
+            return;
+        }
+        if (!"EXECUTE".equals(action) && !"ADJUST".equals(action)) {
+            throw new BusinessException(400, "未知的处置动作：" + action);
+        }
+
+        DisputeHandleRequest handleReq = new DisputeHandleRequest();
+        handleReq.setApproved(true);
+        handleReq.setHandlerNote(request.getNote());
+        String actualItems;
+        // 其他纠纷的旧自动分支只回滚认领方与转发方，与处置单展示的四项不一致，
+        // 因此该类型的 EXECUTE 也按处置单的建议项执行（等价于逐条调整），保证「看到什么就执行什么」
+        boolean manualPath = "ADJUST".equals(action)
+                || (TYPE_OTHER.equals(dispute.getDisputeType()) && outcomeOfVerdict(dispute.getSiteVerdict()) == null);
+        if (manualPath) {
+            List<String> itemsToUse = "ADJUST".equals(action)
+                    ? (request.getRollbackItems() == null ? List.of() : request.getRollbackItems())
+                    : siteSuggestItemsOf(dispute.getDisputeType(), dispute.getSiteVerdict());
+            handleReq.setRollbackItems(itemsToUse);
+            handleReq.setItemDispose(StringUtils.hasText(request.getItemDispose())
+                    ? request.getItemDispose() : dispute.getSiteDispose());
+            actualItems = String.join(",", itemsToUse);
+        } else {
+            // 按站点结论执行：复用按类型写好的自动路径（含扣分、误领计次、物品去向与通知）
+            handleReq.setOutcome(outcomeOfVerdict(dispute.getSiteVerdict()));
+            handleReq.setRollbackItems(null);
+            handleReq.setItemDispose(null);
+            actualItems = String.join(",", siteSuggestItemsOf(dispute.getDisputeType(), dispute.getSiteVerdict()));
+        }
+
+        handleInternal(id, handleReq, operatorId, false);
+
+        Dispute after = getDisputeOrThrow(id);
+        after.setCreditActualItems(actualItems);
+        after.setCreditHandlerId(operatorId);
+        after.setCreditHandledAt(LocalDateTime.now());
+        disputeMapper.updateById(after);
+
+        notifyCreditApplied(after, actualItems, request.getNote());
+        log.info("积分处置完成：disputeId={}, action={}, items={}, operator={}",
+                id, action, actualItems, operatorId);
+    }
+
+    private void notifyPointRejected(Dispute dispute, String note) {
+        if (dispute.getItemId() == null) {
+            return;
+        }
+        FoundItem item = foundItemMapper.selectById(dispute.getItemId());
+        if (item == null || item.getDropPointId() == null) {
+            return;
+        }
+        DropPoint point = dropPointMapper.selectById(item.getDropPointId());
+        if (point == null || point.getAdminId() == null) {
+            return;
+        }
+        messageService.push(point.getAdminId(), "工单#" + dispute.getId() + " 被打回重判",
+                "系统管理员未按你提交的结论执行积分：" + note
+                        + "。工单已退回「处理中」，请补充核对后重新提交结论。",
+                "DISPUTE", item.getId(), dispute.getApplyId());
+    }
+
+    private void notifyCreditApplied(Dispute dispute, String items, String note) {
+        if (dispute.getItemId() == null) {
+            return;
+        }
+        FoundItem item = foundItemMapper.selectById(dispute.getItemId());
+        if (item == null || item.getDropPointId() == null) {
+            return;
+        }
+        DropPoint point = dropPointMapper.selectById(item.getDropPointId());
+        if (point == null || point.getAdminId() == null) {
+            return;
+        }
+        messageService.push(point.getAdminId(), "工单#" + dispute.getId() + " 积分已处置",
+                "按你提交的结论（" + verdictText(dispute.getSiteVerdict()) + "）已完成积分处置："
+                        + (items == null || items.isBlank() ? "本次无需回滚" : "回滚项 " + items)
+                        + "。物品处置：" + disposeText(dispute.getSiteDispose())
+                        + "。处置说明：" + note + "。工单已结案。",
+                "DISPUTE", item.getId(), dispute.getApplyId());
+    }
+
+    /** 结论码标准化：去空格转大写，空返回 null */
+    private String normalizeVerdict(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String v = raw.trim().toUpperCase();
+        return v.isEmpty() ? null : v;
+    }
+
+    /** 校验站点结论与该工单类型是否匹配，防止「不符却选作废」这类矛盾组合 */
+    private void assertVerdictAllowed(String type, String verdict) {
+        boolean ok;
+        if (TYPE_ITEM_MISMATCH.equals(type)) {
+            ok = VERDICT_MISMATCH_TRUE.equals(verdict) || VERDICT_REJECT.equals(verdict);
+        } else if (TYPE_ITEM_DAMAGED.equals(type)) {
+            ok = VERDICT_DAMAGE_CLAIMER.equals(verdict) || VERDICT_DAMAGE_PUBLISHER.equals(verdict)
+                    || VERDICT_DAMAGE_SITE.equals(verdict) || VERDICT_DAMAGE_MAJEURE.equals(verdict)
+                    || VERDICT_REJECT.equals(verdict);
+        } else if (TYPE_FALSE_CLAIM.equals(type)) {
+            ok = VERDICT_FALSE_CLAIM_TRUE.equals(verdict) || VERDICT_REJECT.equals(verdict);
+        } else if (TYPE_ITEM_NOT_FOUND.equals(type)) {
+            ok = VERDICT_NF_FOUND.equals(verdict) || VERDICT_NF_NOT_DELIVERED.equals(verdict)
+                    || VERDICT_NF_STOLEN.equals(verdict) || VERDICT_REJECT.equals(verdict);
+        } else {
+            ok = VERDICT_OTHER_TRUE.equals(verdict) || VERDICT_REJECT.equals(verdict);
+        }
+        if (!ok) {
+            throw new BusinessException(400, "该工单不能选「" + verdictText(verdict) + "」这个结论，请按纠纷类型选择");
+        }
+    }
+
+    /** 结论对应的物品去向（站点只给建议，真正落地由系统执行时统一改） */
+    private String siteDisposeOf(String type, String verdict) {
+        if (VERDICT_REJECT.equals(verdict)) {
+            return "NONE";
+        }
+        // 误领 / 冒领：本次成交无效，物品先「待归还」等站点收回，入库后重新公开
+        if (TYPE_ITEM_MISMATCH.equals(type) || TYPE_FALSE_CLAIM.equals(type)) {
+            return "RETURNING";
+        }
+        // 损坏：物品已经交付到认领人手里、认领关系成立，只定责不收回，状态保持「已领取」
+        if (TYPE_ITEM_DAMAGED.equals(type)) {
+            return "NONE";
+        }
+        if (TYPE_ITEM_NOT_FOUND.equals(type)) {
+            if (VERDICT_NF_NOT_DELIVERED.equals(verdict)) {
+                return "VOIDED";
+            }
+            if (VERDICT_NF_STOLEN.equals(verdict)) {
+                return "LOST";
+            }
+            return "NONE";
+        }
+        return "VOIDED";
+    }
+
+    /** 结论对应的应回滚项（展示给系统管理员核对，执行时仍按类型规则） */
+    private List<String> siteSuggestItemsOf(String type, String verdict) {
+        if (verdict == null || VERDICT_REJECT.equals(verdict)) {
+            return List.of();
+        }
+        if (TYPE_ITEM_MISMATCH.equals(type) || TYPE_FALSE_CLAIM.equals(type)) {
+            return List.of("CLAIMER", "FORWARD", "PUBLISH_PICKUP");
+        }
+        if (TYPE_ITEM_DAMAGED.equals(type)) {
+            return VERDICT_DAMAGE_CLAIMER.equals(verdict) ? List.of("CLAIMER") : List.of();
+        }
+        if (TYPE_ITEM_NOT_FOUND.equals(type)) {
+            // 未成交：3 分与转发分都没发过，只需退回站点确认投放时发的 +1
+            return VERDICT_NF_NOT_DELIVERED.equals(verdict) ? List.of("PUBLISH_CHECK") : List.of();
+        }
+        return List.of("CLAIMER", "FORWARD", "PUBLISH_CHECK", "PUBLISH_PICKUP");
+    }
+
+    private String trimDot(String text) {
+        if (text == null) {
+            return "";
+        }
+        String t = text.trim();
+        while (t.endsWith("。") || t.endsWith(".")) {
+            t = t.substring(0, t.length() - 1);
+        }
+        return t;
+    }
+
+    /** 结论附带的固定处罚（不体现在回滚项里，但处置单必须写清，免得系统执行后与站点预期不符） */
+    private String punishTextOf(String verdict) {
+        if (verdict == null) {
+            return "";
+        }
+        return switch (verdict) {
+            case VERDICT_FALSE_CLAIM_TRUE -> "；另按规则扣认领人 5 分、计 1 次误领";
+            case VERDICT_DAMAGE_PUBLISHER -> "；另按规则扣发布人 2 分";
+            case VERDICT_NF_NOT_DELIVERED -> "；另按规则扣发布人 2 分";
+            default -> "";
+        };
+    }
+
+    private boolean needReviewOf(String verdict) {
+        return VERDICT_DAMAGE_SITE.equals(verdict) || VERDICT_DAMAGE_MAJEURE.equals(verdict);
+    }
+
+    /** 结论 → 旧自动路径需要的 outcome 码 */
+    private String outcomeOfVerdict(String verdict) {
+        if (verdict == null) {
+            return null;
+        }
+        return switch (verdict) {
+            case VERDICT_NF_FOUND -> RESULT_FOUND;
+            case VERDICT_NF_NOT_DELIVERED -> RESULT_NOT_DELIVERED;
+            case VERDICT_NF_STOLEN -> RESULT_STOLEN;
+            case VERDICT_DAMAGE_CLAIMER -> FAULT_CLAIMER;
+            case VERDICT_DAMAGE_PUBLISHER -> FAULT_PUBLISHER;
+            case VERDICT_DAMAGE_SITE, VERDICT_DAMAGE_MAJEURE -> FAULT_SITE;
+            default -> null;
+        };
+    }
+
+    /** 结论中文说明：站内信、处置单、回执共用一套口径 */
+    private String verdictText(String verdict) {
+        if (verdict == null) {
+            return "未出结论";
+        }
+        return switch (verdict) {
+            case VERDICT_MISMATCH_TRUE -> "误领成立（认领人拿错）";
+            case VERDICT_FALSE_CLAIM_TRUE -> "冒领成立（非本人领取）";
+            case VERDICT_OTHER_TRUE -> "其他纠纷成立";
+            case VERDICT_DAMAGE_CLAIMER -> "物品损坏 · 认领人责任";
+            case VERDICT_DAMAGE_PUBLISHER -> "物品损坏 · 发布人责任";
+            case VERDICT_DAMAGE_SITE -> "物品损坏 · 站点责任";
+            case VERDICT_DAMAGE_MAJEURE -> "物品损坏 · 不可抗力";
+            case VERDICT_NF_FOUND -> "实物在站（误报）";
+            case VERDICT_NF_NOT_DELIVERED -> "从未实际投放（虚假招领）";
+            case VERDICT_NF_STOLEN -> "实物已被他人拿走";
+            case VERDICT_REJECT -> "申诉不成立";
+            default -> verdict;
+        };
+    }
+
+    private String disposeText(String dispose) {
+        if (dispose == null) {
+            return "不动";
+        }
+        return switch (dispose.toUpperCase()) {
+            case "RETURNING" -> "待归还（收回后重新公开）";
+            case "VOIDED" -> "作废归档（不再公开）";
+            case "LOST" -> "丢失待查";
+            case "PUBLIC" -> "重新公开";
+            default -> "不动";
+        };
     }
 
     /**
@@ -1042,14 +1374,14 @@ public class DisputeServiceImpl implements DisputeService {
                 faultText = "经核验，损坏发生在站点保管或流转环节，由站点担责并记入站点考核，不与用户诚信分挂钩。";
                 claimerCreditLine = "本次损坏定责为站点保管责任，你的取件奖励 +1 分不予回滚。";
             }
-            // 损坏件按规则表「转发不动」，这里不撤回转发奖励
-            item.setItemStatus(ItemStatus.RETURNING.getCode());
-            foundItemMapper.updateById(item);
+            // 损坏件「转发不动」，这里不撤回转发奖励；
+            // 物品已交付认领人，认领关系仍然成立，状态保持「已领取」，不退回站点、不重新公开
             notifyPublisherInvalidated(item, dispute.getId(), label,
-                    "认领人反馈领取后物品已损坏，该次认领已作废，物品退回站点核验。" + faultText,
+                    "认领人反馈领取后物品已损坏，经核验：" + faultText
+                            + "物品仍在认领人处，状态保持「已领取（认领完成）」，不退回站点、也不会重新公开。",
                     "该情形不计误领次数（除认定认领人担责外）。", false, false);
             notifyClaimerInvalidated(apply, item, dispute.getId(), label,
-                    "你反馈的「物品损坏」已核实，本次认领已作废、物品退回站点。",
+                    "你反馈的「物品损坏」已核实：物品已在你处，本次认领视为完成，仅按责任方处理积分，不需要你把东西送回站点。",
                     faultText, claimerCreditLine, false);
         } else {
             // 其他纠纷：判作废，物品不再公开，发布人奖励随之回滚
@@ -1123,10 +1455,9 @@ public class DisputeServiceImpl implements DisputeService {
         // 从未实际投放：虚假招领，回滚发布人拾获加分并处罚
         String reason = "虚假招领（未实际投放实物，工单#" + dispute.getId() + "）：" + request.getHandlerNote();
         Long publisherId = item.getActualFounderId() != null ? item.getActualFounderId() : item.getFounderId();
-        // 发放按成交绑定了 applyId，这里按同一笔申请回滚
-        rollbackSingle(publisherId, "PICKUP_ISSUE", 3, item.getId(), apply.getId(), reason, operatorId);
-        // 投放/交物的 +1 保留：图2 该行只要求回滚拾获的 3 分并扣 2 分
-        rollbackForwardReward(item, apply, reason, operatorId);
+        // 未确认领取就没有成交：+3 与转发 +1 从未发放，无从回滚；
+        // 按图2 只退回「站点确认投放时发的 +1」，并扣发布人 2 分
+        rollbackSingle(publisherId, "CHECK_ISSUE", 1, item.getId(), null, reason, operatorId);
         creditService.issueCreditOnce(publisherId, -FALSE_PUBLISH_PENALTY, "FALSE_PUBLISH_PENALTY",
                 item.getId(), apply.getId(), "虚假招领（物品不见）：未实际投放实物，扣 2 分（工单#" + dispute.getId() + "）", operatorId);
 
@@ -1456,6 +1787,8 @@ public class DisputeServiceImpl implements DisputeService {
     }
 
     private DisputeVO toVO(Dispute d, String itemTitle) {
-        return DisputeVO.fromEntity(d, null, itemTitle);
+        DisputeVO vo = DisputeVO.fromEntity(d, null, itemTitle);
+        vo.setSiteVerdictText(verdictText(d.getSiteVerdict()));
+        return vo;
     }
 }

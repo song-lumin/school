@@ -44,6 +44,7 @@ public class DropPointServiceImpl implements DropPointService {
     /** 「物品损坏」纠纷类型：损坏件回收后必须作废，绝不重回公开待认领池 */
     private static final String DISPUTE_TYPE_ITEM_DAMAGED = "ITEM_DAMAGED";
     private static final int DISPUTE_STATUS_APPROVED = 1;
+    private static final int DISPUTE_STATUS_CREDIT_PENDING = 4;
 
     private final DropPointMapper dropPointMapper;
     private final UserMapper userMapper;
@@ -251,11 +252,24 @@ public class DropPointServiceImpl implements DropPointService {
             throw new BusinessException(409, "只有「待归还」的物品可以确认入库");
         }
 
-        // 损坏件绝不重回公开池：该物品只要存在「物品损坏」定责通过的记录，入库即作废归档
-        boolean damagedVerdict = disputeMapper.selectCount(new LambdaQueryWrapper<Dispute>()
+        // 优先读定责时落库的处置结论：站点给结论、系统执行后写进 site_dispose，
+        // 不再靠「有没有 ITEM_DAMAGED 工单」反查，避免站点处置与工单类型两套口径打架
+        Dispute latestVerdict = disputeMapper.selectOne(new LambdaQueryWrapper<Dispute>()
+                .eq(Dispute::getItemId, itemId)
+                .in(Dispute::getStatus, DISPUTE_STATUS_APPROVED, DISPUTE_STATUS_CREDIT_PENDING)
+                .orderByDesc(Dispute::getId)
+                .last("LIMIT 1"));
+        String disposed = latestVerdict == null ? null : latestVerdict.getSiteDispose();
+        // 损坏案的结论去向写的是「待归还」（等站点把实物收回来），但入库这一秒必须作废：
+        // 只看 site_dispose 会把 RETURNING 当成「重新公开」，把坏件又扔回公开池
+        boolean damagedDispute = latestVerdict != null
+                && DISPUTE_TYPE_ITEM_DAMAGED.equals(latestVerdict.getDisputeType());
+        boolean damagedVerdict = damagedDispute
+                || "VOIDED".equalsIgnoreCase(disposed)
+                || (disposed == null && disputeMapper.selectCount(new LambdaQueryWrapper<Dispute>()
                 .eq(Dispute::getItemId, itemId)
                 .eq(Dispute::getDisputeType, DISPUTE_TYPE_ITEM_DAMAGED)
-                .eq(Dispute::getStatus, DISPUTE_STATUS_APPROVED)) > 0;
+                .eq(Dispute::getStatus, DISPUTE_STATUS_APPROVED)) > 0);
 
         com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<FoundItem> updateWrapper =
                 new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
@@ -267,7 +281,10 @@ public class DropPointServiceImpl implements DropPointService {
                     .set(FoundItem::getTakedownAt, LocalDateTime.now())
                     .set(FoundItem::getTakedownBy, operatorId);
         } else {
-            updateWrapper.set(FoundItem::getClaimedAt, null);
+            updateWrapper.set(FoundItem::getClaimedAt, null)
+                    // 重新公开即重新计时：不重置的话，发布已超 7 天的易腐件放回后会被当晚的超期任务直接归档
+                    .set(FoundItem::getPublishedAt, LocalDateTime.now())
+                    .set(FoundItem::getExpireWarningSent, 0);
         }
         foundItemMapper.update(null, updateWrapper);
 

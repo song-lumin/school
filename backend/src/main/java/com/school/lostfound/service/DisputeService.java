@@ -2,6 +2,7 @@ package com.school.lostfound.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.school.lostfound.dto.DisputeCreateRequest;
+import com.school.lostfound.dto.DisputeCreditApplyRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
 import com.school.lostfound.dto.PointCheckRequest;
 import com.school.lostfound.vo.DisputeVO;
@@ -22,6 +23,12 @@ public interface DisputeService {
     IPage<DisputeVO> listMy(Long currentUserId, int page, int size);
 
     void handle(Long id, DisputeHandleRequest request, Long operatorId);
+
+    /**
+     * 系统管理员处理「待积分处置」工单：站点已给结论，这里只执行积分。
+     * EXECUTE 按站点结论执行、ADJUST 按勾选项执行、REJECT 打回站点重判。
+     */
+    void applyCredit(Long id, DisputeCreditApplyRequest request, Long operatorId);
 
     /**
      * 站点回填 SLA 催办：待处理工单满 24h 仍未回填现场核验的，向系统管理员生成催办任务。

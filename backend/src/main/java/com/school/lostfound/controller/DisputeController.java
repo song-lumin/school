@@ -2,6 +2,7 @@ package com.school.lostfound.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.school.lostfound.dto.DisputeCreateRequest;
+import com.school.lostfound.dto.DisputeCreditApplyRequest;
 import com.school.lostfound.dto.DisputeHandleRequest;
 import com.school.lostfound.dto.PointCheckRequest;
 import com.school.lostfound.service.DisputeService;
@@ -90,5 +91,19 @@ public class DisputeController {
         Long operatorId = (Long) authentication.getPrincipal();
         disputeService.handle(id, request, operatorId);
         return Result.success("处理完成", null);
+    }
+
+    /**
+     * 积分处置：站点已给结论的工单（状态 4）由系统管理员执行积分。
+     * action = EXECUTE 按站点结论执行 / ADJUST 按勾选项执行 / REJECT 打回站点重判。
+     */
+    @PutMapping("/{id}/credit-apply")
+    @PreAuthorize("hasRole('SYS_ADMIN')")
+    public Result<Void> applyCredit(@PathVariable Long id,
+                                    @Valid @RequestBody DisputeCreditApplyRequest request,
+                                    Authentication authentication) {
+        Long operatorId = (Long) authentication.getPrincipal();
+        disputeService.applyCredit(id, request, operatorId);
+        return Result.success("积分处置完成", null);
     }
 }

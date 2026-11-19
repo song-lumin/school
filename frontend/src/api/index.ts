@@ -268,9 +268,14 @@ export const disputeApi = {
     return request.get<any, ApiResponse<PageResult<DisputeVO>>>('/disputes/point', { params })
   },
 
-  /** 站点管理员：回填现场核验事实；传 outcome 表示当场给出结论，由系统直接结算积分 */
-  pointCheck(id: number | string, note: string, outcome?: string) {
-    return request.put<any, ApiResponse<void>>(`/disputes/${id}/point-check`, outcome ? { note, outcome } : { note })
+  /** 站点管理员：回填现场情况；传 verdict 表示当场给出结论（工单转「待积分处置」） */
+  pointCheck(id: number | string, note: string, verdict?: string) {
+    return request.put<any, ApiResponse<void>>(`/disputes/${id}/point-check`, verdict ? { note, verdict } : { note })
+  },
+
+  /** 系统管理员：站点出结论后执行积分，EXECUTE 按结论 / ADJUST 按勾选项 / REJECT 打回站点 */
+  applyCredit(id: number | string, data: { action: 'EXECUTE' | 'ADJUST' | 'REJECT'; rollbackItems?: string[]; itemDispose?: string; note: string }) {
+    return request.put<any, ApiResponse<void>>(`/disputes/${id}/credit-apply`, data)
   },
 
   /** 系统管理员：手动触发站点回填 SLA 催办（定时任务每小时也跑一次） */
